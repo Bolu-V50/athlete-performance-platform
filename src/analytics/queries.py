@@ -141,3 +141,75 @@ def ingested_session_dates(athlete_code: str) -> set[str]:
         c=athlete_code,
     )
     return set() if df.empty else {d.isoformat() for d in df["session_date"]}
+
+
+# ---------------------------------------------------------------------------
+# physical qualities
+# ---------------------------------------------------------------------------
+def quality_profile(athlete_code: str) -> pd.DataFrame:
+    """One row per physical quality: headline metric, fitted trend, direction."""
+    return _df(
+        "select * from v_quality_profile where athlete_code = :c order by quality_order, display_name",
+        c=athlete_code,
+    )
+
+
+def metric_trends(athlete_code: str) -> pd.DataFrame:
+    return _df(
+        "select * from v_metric_trend where athlete_code = :c "
+        "order by quality_order, is_headline desc, display_name",
+        c=athlete_code,
+    )
+
+
+def test_days(athlete_code: str) -> pd.DataFrame:
+    """Dates on which this athlete was tested, and what was measured."""
+    return _df(
+        """
+        select session_date,
+               count(distinct session_type) n_tests,
+               count(*)                     n_metrics,
+               string_agg(distinct session_type, ', ' order by session_type) tests
+        from v_test_day where athlete_code = :c
+        group by session_date order by session_date desc
+        """,
+        c=athlete_code,
+    )
+
+
+def test_day_detail(athlete_code: str, session_date) -> pd.DataFrame:
+    return _df(
+        "select * from v_test_day where athlete_code = :c and session_date = :d "
+        "order by quality_order, is_headline desc, display_name",
+        c=athlete_code, d=session_date,
+    )
+
+
+def metric_series(athlete_code: str, metric_name: str) -> pd.DataFrame:
+    return _df(
+        """
+        select session_date, metric_value, display_name, unit, higher_is_better, quality_name
+        from v_metric_history
+        where athlete_code = :c and metric_name = :m
+        order by session_date
+        """,
+        c=athlete_code, m=metric_name,
+    )
+
+
+def qualities() -> pd.DataFrame:
+    return _df("select * from quality_catalog order by sort_order")
+
+
+def headline_history(athlete_code: str) -> pd.DataFrame:
+    """Every measurement of every headline metric, for the small-multiple trends."""
+    return _df(
+        """
+        select h.session_date, h.metric_value, h.metric_name, h.display_name,
+               h.unit, h.quality_name, h.quality_order, h.higher_is_better
+        from v_metric_history h
+        where h.athlete_code = :c and h.is_headline
+        order by h.quality_order, h.display_name, h.session_date
+        """,
+        c=athlete_code,
+    )

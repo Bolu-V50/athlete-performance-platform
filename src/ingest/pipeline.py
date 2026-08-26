@@ -229,6 +229,101 @@ def ingest_force_plate(conn: Connection, st: RunStats, directory: Path, known: d
 
 
 # ---------------------------------------------------------------------------
+# laboratory / field test batteries
+# ---------------------------------------------------------------------------
+def load_catalog(conn: Connection) -> dict[str, dict[str, Any]]:
+    """The metric catalogue drives this whole branch.
+
+    Which test a column belongs to, which device produced it, and what counts as
+    a physiologically possible value all come from the catalogue rather than
+    from code. Adding a new test means inserting catalogue rows -- the pipeline,
+    the validation and the dashboard all pick it up with no change.
+    """
+    return {
+        r.metric_name: dict(
+            session_type=r.session_type, source=r.source,
+            lo=float(r.typical_min) if r.typical_min is not None else None,
+            hi=float(r.typical_max) if r.typical_max is not None else None,
+            display=r.display_name, unit=r.unit,
+        )
+        for r in conn.execute(
+            text("select metric_name, session_type, source, typical_min, typical_max, "
+                 "display_name, unit from metric_catalog")
+        )
+    }
+
+
+def ingest_battery(
+    conn: Connection, st: RunStats, path: Path, known: dict[str, int],
+    catalog: dict[str, dict[str, Any]],
+) -> None:
+    """Melt a wide test export into the long metrics table.
+
+    Athlete management systems export one wide, sparse row per athlete-day, with
+    a column per measurement and blanks where that test was not run. The long
+    table wants one row per measurement. Reshaping is this function's job, and
+    it is the reason the schema is long: sprint, Wingate and skinfold data land
+    in the same table as jump data without a single new column.
+    """
+    df = pd.read_csv(path)
+    value_cols = [c for c in df.columns if c not in ("athlete_code", "date")]
+    unknown_cols = [c for c in value_cols if c not in catalog]
+    for c in unknown_cols:
+        st.warn(path.name, None, "uncatalogued_metric",
+                f"column '{c}' has no metric_catalog entry; not ingested")
+
+    metric_rows: list[dict[str, Any]] = []
+    sessions_seen: set[tuple[int, str, str]] = set()
+    st.read = 0
+
+    for i, row in enumerate(df.itertuples(index=False), start=2):
+        code = str(row.athlete_code)
+        ref = f"{path.name}:{i}"
+        measured = [c for c in value_cols
+                    if c in catalog and pd.notna(getattr(row, c)) and str(getattr(row, c)) != ""]
+        st.read += len(measured)
+
+        if code not in known:
+            for c in measured:
+                st.reject(ref, code, "unknown_athlete_code", f"{c}: athlete not on the roster")
+            continue
+
+        for c in measured:
+            spec = catalog[c]
+            try:
+                value = float(getattr(row, c))
+            except (TypeError, ValueError):
+                st.reject(ref, code, "non_numeric_value", f"{c}={getattr(row, c)!r}")
+                continue
+            lo, hi = spec["lo"], spec["hi"]
+            if (lo is not None and value < lo) or (hi is not None and value > hi):
+                st.reject(ref, code, "value_out_of_range",
+                          f"{spec['display']} {value} {spec['unit']} outside {lo}-{hi}")
+                continue
+
+            key = (known[code], str(row.date), spec["session_type"])
+            if key not in sessions_seen:
+                _upsert_session(conn, known[code], row.date, spec["session_type"])
+                sessions_seen.add(key)
+            metric_rows.append(dict(code=known[code], d=row.date,
+                                    kind=spec["session_type"], name=c,
+                                    value=value, src=spec["source"]))
+
+    if metric_rows:
+        conn.execute(
+            text(
+                "insert into performance_metrics (session_id, metric_name, metric_value, source) "
+                "select s.session_id, :name, :value, :src from sessions s "
+                "where s.athlete_id = :code and s.session_date = :d and s.session_type = :kind "
+                "on conflict (session_id, metric_name, source) do update set "
+                "  metric_value = excluded.metric_value, ingested_at = now()"
+            ),
+            metric_rows,
+        )
+    st.loaded = len(metric_rows)
+
+
+# ---------------------------------------------------------------------------
 # sRPE branch
 # ---------------------------------------------------------------------------
 def ingest_srpe(conn: Connection, st: RunStats, path: Path, known: dict[str, int]) -> None:
@@ -283,7 +378,12 @@ def run_pipeline(data_dir: Path = DATA, verbose: bool = True) -> list[RunStats]:
     engine = get_engine()
     results: list[RunStats] = []
 
-    for source, fn in (("force_plate_csv", "force"), ("srpe_diary", "srpe")):
+    for source, fn in (
+        ("force_plate_csv", "force"),
+        ("lab_tests", "battery"),
+        ("field_tests", "battery"),
+        ("srpe_diary", "srpe"),
+    ):
         st = RunStats(source=source)
         # The run record is committed in its own transaction so that a failure
         # in the body still leaves a durable record that the run was attempted.
@@ -300,6 +400,9 @@ def run_pipeline(data_dir: Path = DATA, verbose: bool = True) -> list[RunStats]:
                 )
                 if fn == "force":
                     ingest_force_plate(conn, st, data_dir / "force_plate", known)
+                elif fn == "battery":
+                    ingest_battery(conn, st, data_dir / f"{source}.csv",
+                                   known, load_catalog(conn))
                 else:
                     ingest_srpe(conn, st, data_dir / "srpe_diary.csv", known)
         except Exception:

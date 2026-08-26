@@ -1,4 +1,4 @@
-"""Apply src/db/views.sql. Idempotent (CREATE OR REPLACE)."""
+"""Apply every view definition. Idempotent (CREATE OR REPLACE)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,13 +7,15 @@ from sqlalchemy import text
 
 from src.db.connection import get_engine, redacted_url
 
-VIEWS_PATH = Path(__file__).with_name("views.sql")
+HERE = Path(__file__).parent
+VIEW_FILES = ["views.sql", "views_qualities.sql"]
 
 
 def main() -> None:
-    print(f"applying {VIEWS_PATH.name} to {redacted_url()}")
+    print(f"applying {', '.join(VIEW_FILES)} to {redacted_url()}")
     with get_engine().begin() as conn:
-        conn.execute(text(VIEWS_PATH.read_text()))
+        for name in VIEW_FILES:
+            conn.execute(text((HERE / name).read_text()))
         rows = (
             conn.execute(
                 text(
@@ -24,7 +26,7 @@ def main() -> None:
             .scalars()
             .all()
         )
-    print("views:", ", ".join(rows) or "(none)")
+    print("views:", ", ".join(rows))
 
 
 if __name__ == "__main__":

@@ -191,8 +191,38 @@ _DASHES = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2212"), "-")
 CONTEXT_NUMBERS = {0.8, 1.3, 1.5, 7.0, 28.0, 1.0}
 
 
+def _matches_at_written_precision(written: str, allowed: set[float]) -> bool:
+    """Does a number the model wrote correspond to one the system computed?
+
+    A fixed absolute tolerance is the obvious approach and it leaks. With a
+    tolerance of 0.005, a model that quietly subtracted two values and wrote
+    "0.048" was waved through because an unrelated r-squared of 0.05 sat within
+    the window. Matching at the precision the model actually wrote closes it:
+    "0.048" must be some computed value rounded to three places, which 0.05 is
+    not, while "0.05" still matches a computed 0.048 because rounding to two
+    places is a legitimate thing to do to it.
+    """
+    decimals = len(written.split(".")[1]) if "." in written else 0
+    target = float(written)
+    return any(round(a, decimals) == target for a in allowed)
+
+
+def _numbers_in_text(text_block: str) -> set[float]:
+    """Every number that literally appears in the fact block.
+
+    The guard's real rule is traceability: a number the coach reads must be one
+    the system computed. Restricting the allowed set to *values* was too narrow,
+    because measurement and test names carry numbers of their own -- "505 change
+    of direction", "30-15 IFT", "sum of 7 skinfolds", "10 m sprint". Those were
+    scored as fabricated measurements and perfectly good summaries were thrown
+    away. Anything printed in the facts is by definition traceable to them.
+    """
+    return {float(m) for m in _NUM.findall(text_block)}
+
+
 def allowed_numbers(s: Snapshot) -> set[float]:
     vals: set[float] = set(CONTEXT_NUMBERS)
+    vals |= _numbers_in_text(render_facts(s))
     vals.update({float(s.n_athletes), float(s.n_flag), float(s.n_watch),
                  float(s.n_load_concern), float(s.rejected_today)})
     vals.update(float(i) for i in range(0, s.n_athletes + 1))  # counts
@@ -210,7 +240,7 @@ def allowed_numbers(s: Snapshot) -> set[float]:
     return vals
 
 
-def numeric_guard(body: str, s: Snapshot, tol: float = 0.005) -> tuple[bool, list[float]]:
+def numeric_guard(body: str, s: Snapshot) -> tuple[bool, list[float]]:
     """Check that every number in the text traces back to the fact block.
 
     Athlete codes and ISO dates are stripped first -- 'ATH-009' is an identifier,
@@ -221,8 +251,8 @@ def numeric_guard(body: str, s: Snapshot, tol: float = 0.005) -> tuple[bool, lis
     stripped = _ISO_DATE.sub(" ", _CODE.sub(" ", normalised))
     allowed = allowed_numbers(s)
     offenders = [
-        x for x in (float(m) for m in _NUM.findall(stripped))
-        if not any(abs(x - a) <= tol for a in allowed)
+        float(w) for w in _NUM.findall(stripped)
+        if not _matches_at_written_precision(w, allowed)
     ]
     return (not offenders), offenders
 
@@ -397,3 +427,229 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ===========================================================================
+# per-athlete narrative
+# ---------------------------------------------------------------------------
+# The squad briefing answers "who today". This answers "how is this athlete
+# developing", which is a different question over a different time scale, and it
+# is the one a coach asks in a review meeting rather than on the training floor.
+#
+# The governance is unchanged and non-negotiable: every trend, percentage and
+# direction is computed in SQL by v_quality_profile, the model receives them
+# already decided, and the same numeric guard rejects anything it invents.
+#
+# One deliberate extension: the athlete narrative is allowed to name the quality
+# that has progressed least, because that is a statement about the data. It is
+# still forbidden from prescribing training. Naming where the numbers are flat
+# is analysis; deciding what to do about it is the coach's job and depends on
+# the competition calendar, the athlete's history and a hundred things this
+# system cannot see.
+# ===========================================================================
+
+ATHLETE_SYSTEM_PROMPT = """You write a short development summary about one athlete for their coach.
+
+Rules, all of them absolute:
+- Use ONLY numbers that appear verbatim in the FACTS block. Copy them exactly.
+- Do NOT calculate anything: no differences, averages, rankings or totals that
+  are not already given to you.
+- Directions are already decided for you ('improving', 'stable', 'declining').
+  Never contradict one, and never infer a direction that is not stated.
+- A quality marked 'insufficient_data' has not been measured enough to judge.
+  Say that it has not been assessed; do not describe it as stable.
+- You MAY name the quality that has progressed least or is declining, and say it
+  is the area the data points to for discussion. Do NOT prescribe training:
+  no sets, sessions, exercises, volumes, loads or rest.
+- Do NOT speculate about causes (injury, illness, sleep, motivation).
+- Do NOT state the date.
+- Three to four sentences of plain English for a coach, not a data scientist.
+  No bullet points, no headings."""
+
+
+@dataclass
+class AthleteSnapshot:
+    athlete_code: str
+    squad: str
+    window_start: date | None
+    window_end: date | None
+    qualities: list[dict[str, Any]] = field(default_factory=list)
+    n_test_days: int = 0
+    baseline_status: str = "no_data"
+    acwr: float | None = None
+    acwr_zone: str = "no_data"
+
+
+def collect_athlete_snapshot(athlete_code: str) -> AthleteSnapshot:
+    from src.analytics.queries import quality_profile, squad_status, test_days
+
+    prof = quality_profile(athlete_code)
+    days = test_days(athlete_code)
+    status = squad_status()
+    row = status[status["athlete_code"] == athlete_code]
+
+    qualities: list[dict[str, Any]] = []
+    for r in prof.itertuples(index=False):
+        qualities.append(
+            dict(
+                quality=r.quality_name,
+                metric=r.display_name,
+                unit=r.unit,
+                n_tests=int(r.n_tests),
+                first_value=float(r.first_value),
+                latest_value=float(r.latest_value),
+                pct=float(r.pct_improvement_fitted) if r.pct_improvement_fitted is not None else None,
+                sd=float(r.fitted_change_in_sd) if r.fitted_change_in_sd is not None else None,
+                r2=float(r.trend_r2) if r.trend_r2 is not None else None,
+                direction=r.direction,
+            )
+        )
+
+    return AthleteSnapshot(
+        athlete_code=athlete_code,
+        squad=str(row["squad"].iloc[0]) if not row.empty else "",
+        window_start=days["session_date"].min() if not days.empty else None,
+        window_end=days["session_date"].max() if not days.empty else None,
+        qualities=qualities,
+        n_test_days=len(days),
+        baseline_status=str(row["baseline_status"].iloc[0]) if not row.empty else "no_data",
+        acwr=float(row["acwr"].iloc[0]) if not row.empty and row["acwr"].iloc[0] is not None else None,
+        acwr_zone=str(row["acwr_zone"].iloc[0]) if not row.empty else "no_data",
+    )
+
+
+def render_athlete_facts(s: AthleteSnapshot) -> str:
+    lines = [
+        f"ATHLETE: {s.athlete_code} ({s.squad})",
+        f"TEST DAYS IN WINDOW: {s.n_test_days}",
+        "",
+        "PHYSICAL QUALITIES (trend fitted across every test, not first vs last):",
+    ]
+    if not s.qualities:
+        lines.append("  no physical testing on record")
+    for q in s.qualities:
+        if q["direction"] == "insufficient_data":
+            lines.append(f"  {q['quality']} — {q['metric']}: only {q['n_tests']} tests, "
+                         "not enough to judge a direction")
+            continue
+        conf = ""
+        if q["r2"] is not None:
+            conf = (" (scattered — the line explains little of the variation)"
+                    if q["r2"] < 0.2 else "")
+        lines.append(
+            f"  {q['quality']} — {q['metric']}: {q['first_value']} to {q['latest_value']} "
+            f"{q['unit']} over {q['n_tests']} tests, {q['pct']:+.1f}% "
+            f"(positive always means better, whichever way the metric runs), "
+            f"{q['sd']:+.2f} of this athlete's own SD, "
+            f"direction {q['direction']}{conf}"
+        )
+    lines += [
+        "",
+        f"TODAY'S NEUROMUSCULAR STATUS: {s.baseline_status}",
+        f"WORKLOAD RATIO: {s.acwr if s.acwr is not None else 'not available'} ({s.acwr_zone})",
+    ]
+    return "\n".join(lines)
+
+
+def athlete_allowed_numbers(s: AthleteSnapshot) -> set[float]:
+    vals: set[float] = set(CONTEXT_NUMBERS)
+    vals |= _numbers_in_text(render_athlete_facts(s))
+    vals.update(float(i) for i in range(0, max(s.n_test_days, 12) + 1))
+    if s.acwr is not None:
+        vals.add(round(float(s.acwr), 4))
+    for q in s.qualities:
+        for v in (q["first_value"], q["latest_value"], q["pct"], q["sd"], q["r2"], q["n_tests"]):
+            if v is not None:
+                vals.add(round(float(v), 4))
+                vals.add(abs(round(float(v), 4)))
+    if s.window_end:
+        vals.update({float(s.window_end.day), float(s.window_end.month), float(s.window_end.year)})
+    return vals
+
+
+def athlete_numeric_guard(body: str, s: AthleteSnapshot) -> tuple[bool, list[float]]:
+    stripped = _ISO_DATE.sub(" ", _CODE.sub(" ", body.translate(_DASHES)))
+    allowed = athlete_allowed_numbers(s)
+    offenders = [
+        float(w) for w in _NUM.findall(stripped)
+        if not _matches_at_written_precision(w, allowed)
+    ]
+    return (not offenders), offenders
+
+
+PRESCRIPTION_WORDS = (
+    "should ", "recommend", "prescrib", "increase the", "reduce the", "add a",
+    "sets", "reps", "sessions per week", "rest day", "deload", "must ",
+)
+
+
+def template_athlete_narrative(s: AthleteSnapshot) -> str:
+    improving = [q for q in s.qualities if q["direction"] == "improving"]
+    declining = [q for q in s.qualities if q["direction"] == "declining"]
+    stable = [q for q in s.qualities if q["direction"] == "stable"]
+    unknown = [q for q in s.qualities if q["direction"] == "insufficient_data"]
+
+    parts: list[str] = []
+    if improving:
+        best = max(improving, key=lambda q: q["pct"] or 0)
+        parts.append(
+            f"{s.athlete_code} is improving in {best['quality'].lower()}: "
+            f"{best['metric']} moved from {best['first_value']} to {best['latest_value']} "
+            f"{best['unit']} across {best['n_tests']} tests ({best['pct']:+.1f}%)."
+        )
+    if declining:
+        worst = min(declining, key=lambda q: q["pct"] or 0)
+        parts.append(
+            f"The area the data points to is {worst['quality'].lower()}: "
+            f"{worst['metric']} is {worst['pct']:+.1f}% over the same window."
+        )
+    if stable and not declining:
+        parts.append(f"{len(stable)} of the measured qualities are holding steady.")
+    if unknown:
+        parts.append(f"{len(unknown)} qualities have too few tests to judge.")
+    if not parts:
+        parts.append(f"{s.athlete_code} has no physical testing on record in this window.")
+    return " ".join(parts)
+
+
+def athlete_narrative(athlete_code: str, backend: Backend | None = None) -> BriefingResult:
+    s = collect_athlete_snapshot(athlete_code)
+    facts = render_athlete_facts(s)
+
+    if backend is None:
+        backend = GroqBackend()
+    if isinstance(backend, TemplateBackend) or not getattr(backend, "available", True):
+        return BriefingResult(text=template_athlete_narrative(s), source="template",
+                              guard_passed=None, fallback_reason="no API key configured")
+
+    try:
+        body = backend.generate(
+            ATHLETE_SYSTEM_PROMPT, f"FACTS\n-----\n{facts}\n\nWrite the summary."
+        )
+    except Exception as exc:  # noqa: BLE001 - any backend failure falls back
+        return BriefingResult(text=template_athlete_narrative(s), source="template",
+                              guard_passed=None,
+                              fallback_reason=f"model call failed: {type(exc).__name__}: {exc}")
+
+    if not body:
+        return BriefingResult(text=template_athlete_narrative(s), source="template",
+                              guard_passed=None, fallback_reason="model returned empty content")
+
+    lowered = body.lower()
+    prescriptions = [w for w in PRESCRIPTION_WORDS if w in lowered]
+    if prescriptions:
+        # Naming where the numbers are flat is analysis. Telling a coach what to
+        # program is not this system's job, and a model that starts doing it has
+        # left the boundary the design depends on.
+        return BriefingResult(
+            text=template_athlete_narrative(s), source="template", guard_passed=False,
+            fallback_reason=f"output strayed into training prescription: {prescriptions}",
+        )
+
+    ok, offenders = athlete_numeric_guard(body, s)
+    if not ok:
+        return BriefingResult(text=template_athlete_narrative(s), source="template",
+                              guard_passed=False, guard_offenders=offenders,
+                              fallback_reason=f"numeric guard rejected: {offenders}")
+
+    return BriefingResult(text=body, source=backend.name, guard_passed=True)

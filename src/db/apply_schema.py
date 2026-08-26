@@ -8,13 +8,14 @@ from sqlalchemy import text
 from src.db.connection import get_engine, redacted_url
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+CATALOG_PATH = Path(__file__).with_name("catalog.sql")
 
 
 def main() -> None:
-    sql = SCHEMA_PATH.read_text()
-    print(f"applying {SCHEMA_PATH.name} to {redacted_url()}")
+    print(f"applying schema.sql + catalog.sql to {redacted_url()}")
     with get_engine().begin() as conn:
-        conn.execute(text(sql))
+        conn.execute(text(SCHEMA_PATH.read_text()))
+        conn.execute(text(CATALOG_PATH.read_text()))
         rows = (
             conn.execute(
                 text(
