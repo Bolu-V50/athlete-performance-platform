@@ -1,0 +1,5 @@
+# Development and CI extras. Not needed to run the dashboard.
+-r requirements.txt
+pytest==9.1.1
+playwright==1.62.0
+pillow==12.3.0

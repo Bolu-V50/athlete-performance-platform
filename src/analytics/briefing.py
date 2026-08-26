@@ -63,6 +63,7 @@ Rules, all of them absolute:
 - Do NOT recommend training changes, rest, load reductions or medical action.
   Report what the monitoring system observed; the coach decides what to do.
 - Do NOT speculate about causes (illness, sleep, travel, injury).
+- Do NOT state the date. The coach knows what day it is and the screen shows it.
 - Two to three sentences of plain English. No bullet points, no headings, no
   jargon the coach has not asked for."""
 
@@ -99,7 +100,9 @@ class Snapshot:
 def collect_snapshot(limit_notable: int = 4) -> Snapshot:
     """Read the squad overview. Pure SQL -- no model involvement."""
     with get_engine().connect() as conn:
-        rows = list(conn.execute(text("select * from v_athlete_status order by attention_rank, athlete_code")))
+        from src.analytics.queries import ATTENTION_ORDER
+
+        rows = list(conn.execute(text(f"select * from v_athlete_status {ATTENTION_ORDER}")))
         as_of = conn.execute(text("select max(session_date) from sessions")).scalar()
         rejected = conn.execute(
             text(
@@ -193,6 +196,12 @@ def allowed_numbers(s: Snapshot) -> set[float]:
     vals.update({float(s.n_athletes), float(s.n_flag), float(s.n_watch),
                  float(s.n_load_concern), float(s.rejected_today)})
     vals.update(float(i) for i in range(0, s.n_athletes + 1))  # counts
+    # The reporting date is itself a fact. Written in prose ("on the 24th",
+    # "Aug 24") it survives the ISO-date strip and would otherwise be scored as
+    # an unverifiable measurement -- a false positive that silently discards
+    # perfectly good output.
+    if s.as_of:
+        vals.update({float(s.as_of.day), float(s.as_of.month), float(s.as_of.year)})
     for r in s.rows:
         for v in (r.jump_height_m, r.baseline_mean_m, r.z_score, r.pct_below_baseline, r.acwr):
             if v is not None:

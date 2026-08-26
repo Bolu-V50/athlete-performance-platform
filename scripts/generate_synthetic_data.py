@@ -79,7 +79,7 @@ def write_force_traces(rng: np.random.Generator) -> int:
 
     days = season_dates()
     written = 0
-    sample_taken = 0
+    last_for_athlete: dict[str, tuple] = {}
 
     for code, _sport, _sex, _squad, mass, base_h, fatigue in ATHLETES:
         for i, d in enumerate(days):
@@ -107,9 +107,15 @@ def write_force_traces(rng: np.random.Generator) -> int:
             )
             _write_trace(TRACES / f"{code}_{d.isoformat()}.csv", tr, rng)
             written += 1
-            if sample_taken < 3 and i > 40:
-                _write_trace(SAMPLES / f"{code}_{d.isoformat()}.csv", tr, rng)
-                sample_taken += 1
+            # The most recent trial per athlete is also committed, so the
+            # deployed dashboard can draw a real force-time curve for anyone
+            # without shipping all 16 MB of raw traces.
+            last_for_athlete[code] = (d, tr)
+
+    for old in list(SAMPLES.glob("*.csv")):
+        old.unlink()
+    for code, (d, tr) in last_for_athlete.items():
+        _write_trace(SAMPLES / f"{code}_{d.isoformat()}.csv", tr, rng)
 
     written += _inject_bad_traces(rng, days)
     return written
@@ -197,7 +203,7 @@ def main() -> None:
     size_mb = sum(p.stat().st_size for p in TRACES.glob("*.csv")) / 1e6
     print(f"roster        : {len(ATHLETES)} athletes -> data/synthetic/athletes.csv")
     print(f"force traces  : {n_traces} files ({size_mb:.1f} MB) -> data/synthetic/force_plate/")
-    print(f"sample traces : 3 files (committed) -> data/synthetic/sample_traces/")
+    print(f"sample traces : {len(list(SAMPLES.glob('*.csv')))} files (committed) -> data/synthetic/sample_traces/")
     print(f"sRPE diary    : {n_srpe} rows -> data/synthetic/srpe_diary.csv")
     print("\ninjected faults: unknown athlete code, flat trace, impossible jump,")
     print("                sRPE out of 0-10, negative duration, duplicated athlete-day")

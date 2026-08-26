@@ -1,0 +1,14 @@
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+# Streamlit's default primary is red. On this page red already means "flagged
+# athlete", so a filter chip painted red reads as an alert. The primary is
+# moved to the chart series blue, which carries no status meaning here.
+primaryColor = "#2a78d6"
+backgroundColor = "#fcfcfb"
+secondaryBackgroundColor = "#f2f1ed"
+textColor = "#0b0b0b"
