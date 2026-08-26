@@ -80,3 +80,44 @@ create index if not exists idx_metrics_session      on performance_metrics(sessi
 create index if not exists idx_load_athlete_date    on training_load(athlete_id, date);
 create index if not exists idx_sessions_athlete_date on sessions(athlete_id, session_date);
 create index if not exists idx_metrics_name         on performance_metrics(metric_name);
+
+-- =====================================================================
+-- pipeline_runs  — Phase 3: operational provenance
+-- ---------------------------------------------------------------------
+-- A database you can query is not the same as a database you can trust.
+-- Every ingest writes a run record, so "when did this number last update,
+-- and did that run succeed?" is answerable from SQL rather than from logs.
+-- =====================================================================
+create table if not exists pipeline_runs (
+    run_id        bigserial primary key,
+    source        text not null,             -- 'force_plate_csv' | 'srpe_diary'
+    started_at    timestamptz not null default now(),
+    finished_at   timestamptz,
+    status        text not null default 'running'
+                  check (status in ('running', 'success', 'failed')),
+    rows_read     int not null default 0,
+    rows_loaded   int not null default 0,
+    rows_rejected int not null default 0,
+    error_summary text
+);
+
+-- =====================================================================
+-- data_quality_log
+-- ---------------------------------------------------------------------
+-- Rejected rows are not discarded silently. Each one is recorded with the
+-- rule that caught it, so a practitioner can see exactly which trials were
+-- excluded and why -- and argue with the threshold if it is wrong.
+-- =====================================================================
+create table if not exists data_quality_log (
+    issue_id     bigserial primary key,
+    run_id       bigint references pipeline_runs(run_id) on delete cascade,
+    source_ref   text,                       -- file name or row identifier
+    athlete_code text,
+    rule         text not null,
+    detail       text,
+    severity     text not null check (severity in ('reject', 'warn')),
+    logged_at    timestamptz not null default now()
+);
+
+create index if not exists idx_dq_run on data_quality_log(run_id);
+create index if not exists idx_runs_started on pipeline_runs(started_at desc);

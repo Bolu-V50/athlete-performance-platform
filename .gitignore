@@ -24,3 +24,9 @@ venv/
 *.log
 # figures/ is committed on purpose: the README's force-time diagnostic and the
 # dashboard screenshot are part of what the repository is meant to show.
+
+# --- bulk synthetic data ---
+# 274 raw force-plate traces (~16 MB) are regenerated deterministically by
+# scripts/generate_synthetic_data.py, so they do not belong in git. The roster,
+# the sRPE diary and three sample traces are committed so the repo is runnable.
+data/synthetic/force_plate/
