@@ -61,6 +61,14 @@ insert into metric_catalog (metric_name, display_name, unit, quality, session_ty
 ('yoyo_ir1_distance_m',       'Yo-Yo IR1 distance',     'm',      'aerobic',      'aerobic_test','field_test',       true,  true,  200,   3200, 'Intermittent-recovery running capacity'),
 ('vo2max_mlkgmin',            'Estimated VO2max',       'ml/kg/min','aerobic',    'aerobic_test','field_test',       true,  false, 30.0,  75.0, 'Estimated from Yo-Yo IR1 distance'),
 ('vift_kmh',                  '30-15 IFT final speed',  'km/h',   'aerobic',      'aerobic_test','field_test',       true,  false, 13.0,  24.0, 'Final velocity in the 30-15 Intermittent Fitness Test'),
+-- ---- sport-specific: swimming ----
+-- A land-based 10 m sprint and a Yo-Yo IR1 tell you very little about a
+-- swimmer, so swimming carries its own speed and endurance measures. This is
+-- the reason `quality` and `is_headline` are per-metric rather than per-test:
+-- two sports can fill the same physical quality with entirely different
+-- measurements and the profile still lines up.
+('swim_100m_free_s',          '100 m freestyle',        's',      'speed',        'swim_test',   'pool_timing',      false, true,  45.0,  90.0, 'Time-trial from a push start; lower is better'),
+('css_ms',                    'Critical swim speed',    'm/s',    'aerobic',      'swim_test',   'pool_timing',      true,  true,  0.90,  2.10, 'Speed at the aerobic-anaerobic transition, from 200 m and 400 m trials'),
 -- ---- body composition ----
 ('body_mass_kg',              'Body mass',              'kg',     'body_comp',    'anthropometry','anthropometry',   true,  false, 35.0,  160.0,'Neutral direction; carried for normalisation, not judged'),
 ('sum7_skinfolds_mm',         'Sum of 7 skinfolds',     'mm',     'body_comp',    'anthropometry','anthropometry',   false, true,  25.0,  200.0,'ISAK sum of seven sites. Headline for body composition because body mass has no universal direction -- a thrower gaining mass and a distance runner gaining mass are not the same event. Skinfolds still are not universally lower-is-better either; treat this direction as a default, not a judgement.')

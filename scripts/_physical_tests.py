@@ -1,19 +1,19 @@
-"""Synthetic laboratory and field test batteries.
+"""Synthetic laboratory and field test batteries, differentiated by sport.
 
-Force-plate jump testing is only one of the physical qualities a high-performance
-service monitors. This module generates the rest of a realistic battery --
-maximal strength, speed, change of direction, anaerobic capacity, aerobic
-endurance and body composition -- at the frequencies each is actually tested at.
-A Wingate is not run twice a week; a CMJ is.
+Two things this module exists to get right.
 
-Values are anchored on published ranges for the relevant population and are
-differentiated by sport and sex, because a netball athlete and a male sprinter
-do not share a normative band for anything.
+**Different sports run different tests.** A land-based 10 m sprint and a Yo-Yo
+IR1 say very little about a swimmer, and a service that ran them anyway would be
+filling a database with numbers no coach would act on. Swimming therefore
+carries pool-based speed and endurance measures instead, which is also why the
+metric catalogue attaches `quality` to the metric rather than to the test: two
+sports can fill the same physical quality with entirely different measurements
+and the capability profile still lines up.
 
-Two export shapes are produced on purpose: laboratory tests and field tests
-arrive as separate wide files with sparse columns, which is what an athlete
-management system actually exports. Reshaping those into the long metrics table
-is the pipeline's job.
+**Different sports have different normative bands.** A basketball centre and a
+distance swimmer do not share a range for anything, so nothing here is drawn
+from one global distribution. Values are anchored on published ranges for the
+relevant population and sex.
 """
 
 from __future__ import annotations
@@ -25,73 +25,44 @@ from pathlib import Path
 import numpy as np
 
 # quality -> per-athlete seasonal drift, as a fraction of the starting value.
-# Positive always means "better", regardless of whether the underlying metric
-# is higher- or lower-is-better; the sign is applied per metric.
+# Positive always means "better"; the sign is applied per metric according to
+# whether that metric improves by rising or by falling.
 TRENDS: dict[str, dict[str, float]] = {
-    "ATH-001": {"max_strength": 0.06, "speed": 0.02, "aerobic": -0.01},
-    "ATH-002": {"max_strength": 0.09, "speed": 0.03, "anaerobic": 0.05},
-    "ATH-003": {"aerobic": 0.11, "cod": 0.04, "max_strength": 0.01},
-    "ATH-004": {"power": 0.05, "cod": 0.06},
+    "ATH-001": {"max_strength": 0.07, "speed": 0.03, "aerobic": 0.02},
+    "ATH-002": {"max_strength": 0.09, "anaerobic": 0.05, "speed": 0.02},
+    "ATH-003": {"speed": 0.05, "power": 0.04},
+    "ATH-004": {"aerobic": 0.10, "max_strength": 0.02},
     "ATH-005": {"max_strength": 0.12, "power": 0.06, "aerobic": -0.03},
-    "ATH-006": {"power": 0.03, "speed": 0.01},
-    "ATH-007": {"aerobic": 0.08, "anaerobic": 0.04},
-    "ATH-008": {"cod": 0.07, "aerobic": 0.03},
-    # A genuine decline to find: strength and power falling away while aerobic
-    # work continues. This is the pattern a coach should be told about.
-    "ATH-009": {"max_strength": -0.09, "power": -0.06, "aerobic": 0.05},
+    "ATH-006": {"aerobic": 0.08, "speed": 0.01},
+    "ATH-007": {"aerobic": 0.09, "cod": 0.05},
+    "ATH-008": {"cod": 0.07, "speed": 0.03, "aerobic": 0.02},
+    # The athlete a coach should be told about: strength and power falling away
+    # while aerobic work carries on.
+    "ATH-009": {"max_strength": -0.09, "power": -0.06, "cod": -0.05, "aerobic": 0.04},
     "ATH-010": {"speed": 0.04, "anaerobic": 0.06},
-    "ATH-011": {"max_strength": 0.05, "aerobic": 0.02},
-    "ATH-012": {"power": 0.04, "cod": 0.03, "aerobic": 0.06},
+    "ATH-011": {"power": 0.05, "max_strength": 0.04},
+    "ATH-012": {"max_strength": 0.08, "anaerobic": 0.03, "aerobic": -0.04},
+    "ATH-013": {"power": 0.06, "cod": 0.04},
+    "ATH-014": {"speed": 0.04, "max_strength": 0.05},
+    "ATH-015": {"max_strength": 0.03, "power": 0.02},
+    "ATH-016": {"speed": 0.06, "power": 0.05, "cod": 0.03},
 }
 
-# test type -> interval in days
-SCHEDULE = {
+SCHEDULE = {           # test type -> interval in days
     "IMTP_test": 28,
     "wingate_test": 42,
     "sprint_test": 21,
     "agility_test": 28,
     "aerobic_test": 42,
     "anthropometry": 28,
+    "swim_test": 28,
 }
 
-
-def _profile(sport: str, sex: str, mass: float, rng) -> dict[str, float]:
-    """Starting values for one athlete, drawn from population-appropriate bands."""
-    male = sex == "M"
-    sprint_pop = sport == "Athletics"
-
-    if sprint_pop and male:
-        s10 = rng.uniform(1.63, 1.76); s30 = s10 * 2.38 + rng.uniform(-0.05, 0.05)
-        vmax = rng.uniform(9.4, 10.6); a505 = rng.uniform(2.32, 2.52)
-        imtp_rel = rng.uniform(34, 46); wg_pk = rng.uniform(13.0, 16.5)
-        yoyo = rng.uniform(720, 1440); skin = rng.uniform(38, 62)
-    elif sprint_pop:
-        s10 = rng.uniform(1.79, 1.93); s30 = s10 * 2.42 + rng.uniform(-0.05, 0.05)
-        vmax = rng.uniform(8.4, 9.3); a505 = rng.uniform(2.44, 2.66)
-        imtp_rel = rng.uniform(28, 38); wg_pk = rng.uniform(10.0, 13.0)
-        yoyo = rng.uniform(680, 1320); skin = rng.uniform(52, 88)
-    else:  # netball
-        s10 = rng.uniform(1.84, 1.99); s30 = s10 * 2.46 + rng.uniform(-0.06, 0.06)
-        vmax = rng.uniform(7.8, 8.8); a505 = rng.uniform(2.46, 2.70)
-        imtp_rel = rng.uniform(26, 36); wg_pk = rng.uniform(9.0, 12.2)
-        yoyo = rng.uniform(880, 1720); skin = rng.uniform(58, 96)
-
-    return {
-        "sprint_10m_s": s10,
-        "sprint_30m_s": s30,
-        "max_velocity_ms": vmax,
-        "agility_505_s": a505,
-        "imtp_relative_force_nkg": imtp_rel,
-        "imtp_peak_force_n": imtp_rel * mass,
-        "imtp_rfd_0_250ms_ns": imtp_rel * mass * rng.uniform(2.4, 3.6),
-        "wingate_peak_power_w_kg": wg_pk,
-        "wingate_mean_power_w_kg": wg_pk * rng.uniform(0.66, 0.75),
-        "wingate_fatigue_index_pct": rng.uniform(34, 58),
-        "yoyo_ir1_distance_m": yoyo,
-        "body_mass_kg": mass,
-        "sum7_skinfolds_mm": skin,
-    }
-
+LAB_COLS = ["imtp_peak_force_n", "imtp_relative_force_nkg", "imtp_rfd_0_250ms_ns",
+            "wingate_peak_power_w_kg", "wingate_mean_power_w_kg", "wingate_fatigue_index_pct"]
+FIELD_COLS = ["sprint_10m_s", "sprint_30m_s", "max_velocity_ms", "agility_505_s",
+              "yoyo_ir1_distance_m", "swim_100m_free_s", "css_ms",
+              "body_mass_kg", "sum7_skinfolds_mm"]
 
 # metric -> (quality, higher_is_better). Kept in step with metric_catalog.
 POLARITY = {
@@ -106,6 +77,8 @@ POLARITY = {
     "wingate_mean_power_w_kg": ("anaerobic", True),
     "wingate_fatigue_index_pct": ("anaerobic", False),
     "yoyo_ir1_distance_m": ("aerobic", True),
+    "swim_100m_free_s": ("speed", False),
+    "css_ms": ("aerobic", True),
     "body_mass_kg": ("body_comp", True),
     "sum7_skinfolds_mm": ("body_comp", False),
 }
@@ -116,17 +89,89 @@ NOISE = {  # within-athlete typical error, as a fraction
     "imtp_peak_force_n": 0.045, "imtp_rfd_0_250ms_ns": 0.10,
     "wingate_peak_power_w_kg": 0.035, "wingate_mean_power_w_kg": 0.030,
     "wingate_fatigue_index_pct": 0.08, "yoyo_ir1_distance_m": 0.06,
+    "swim_100m_free_s": 0.008, "css_ms": 0.020,
     "body_mass_kg": 0.010, "sum7_skinfolds_mm": 0.045,
 }
+
+# which columns belong to which test type
+TEST_OF = {
+    "imtp_peak_force_n": "IMTP_test", "imtp_relative_force_nkg": "IMTP_test",
+    "imtp_rfd_0_250ms_ns": "IMTP_test",
+    "wingate_peak_power_w_kg": "wingate_test", "wingate_mean_power_w_kg": "wingate_test",
+    "wingate_fatigue_index_pct": "wingate_test",
+    "sprint_10m_s": "sprint_test", "sprint_30m_s": "sprint_test",
+    "max_velocity_ms": "sprint_test",
+    "agility_505_s": "agility_test",
+    "yoyo_ir1_distance_m": "aerobic_test",
+    "swim_100m_free_s": "swim_test", "css_ms": "swim_test",
+    "body_mass_kg": "anthropometry", "sum7_skinfolds_mm": "anthropometry",
+}
+
+
+def _profile(sport: str, sex: str, squad: str, mass: float, rng) -> dict[str, float]:
+    """Starting values for one athlete, from population-appropriate bands."""
+    male = sex == "M"
+    p: dict[str, float] = {"body_mass_kg": mass}
+
+    if sport == "Swimming":
+        distance = "Distance" in squad
+        p["imtp_relative_force_nkg"] = rng.uniform(29, 38) if male else rng.uniform(24, 32)
+        p["wingate_peak_power_w_kg"] = (
+            (rng.uniform(10.0, 12.5) if distance else rng.uniform(11.5, 14.5)) if male
+            else (rng.uniform(7.8, 9.8) if distance else rng.uniform(9.0, 11.5))
+        )
+        p["wingate_fatigue_index_pct"] = rng.uniform(28, 46) if distance else rng.uniform(38, 58)
+        base100 = (52.5 if distance else 49.8) if male else (60.0 if distance else 56.5)
+        p["swim_100m_free_s"] = base100 + rng.uniform(-1.4, 1.8)
+        p["css_ms"] = (
+            (rng.uniform(1.46, 1.60) if distance else rng.uniform(1.38, 1.50)) if male
+            else (rng.uniform(1.30, 1.44) if distance else rng.uniform(1.24, 1.36))
+        )
+        p["sum7_skinfolds_mm"] = rng.uniform(40, 62) if male else rng.uniform(66, 92)
+
+    elif sport == "Football":
+        p["imtp_relative_force_nkg"] = rng.uniform(30, 39) if male else rng.uniform(26, 34)
+        p["wingate_peak_power_w_kg"] = rng.uniform(11.5, 14.5) if male else rng.uniform(9.0, 12.0)
+        p["wingate_fatigue_index_pct"] = rng.uniform(34, 54)
+        p["sprint_10m_s"] = rng.uniform(1.70, 1.82) if male else rng.uniform(1.82, 1.94)
+        p["max_velocity_ms"] = rng.uniform(8.8, 9.7) if male else rng.uniform(7.9, 8.8)
+        p["agility_505_s"] = rng.uniform(2.36, 2.52) if male else rng.uniform(2.44, 2.62)
+        # Yo-Yo IR1 was developed and validated on footballers; they score well.
+        p["yoyo_ir1_distance_m"] = rng.uniform(1400, 2200) if male else rng.uniform(1000, 1900)
+        p["sum7_skinfolds_mm"] = rng.uniform(42, 66) if male else rng.uniform(55, 88)
+
+    elif sport == "Basketball":
+        p["imtp_relative_force_nkg"] = rng.uniform(30, 40) if male else rng.uniform(26, 35)
+        p["wingate_peak_power_w_kg"] = rng.uniform(11.0, 14.5) if male else rng.uniform(9.0, 12.0)
+        p["wingate_fatigue_index_pct"] = rng.uniform(36, 56)
+        p["sprint_10m_s"] = rng.uniform(1.66, 1.79) if male else rng.uniform(1.80, 1.92)
+        p["max_velocity_ms"] = rng.uniform(8.8, 9.7) if male else rng.uniform(8.0, 8.9)
+        p["agility_505_s"] = rng.uniform(2.38, 2.58) if male else rng.uniform(2.46, 2.64)
+        p["yoyo_ir1_distance_m"] = rng.uniform(900, 1550) if male else rng.uniform(760, 1320)
+        p["sum7_skinfolds_mm"] = rng.uniform(42, 70) if male else rng.uniform(58, 92)
+
+    else:  # Athletics sprints
+        p["imtp_relative_force_nkg"] = rng.uniform(36, 46) if male else rng.uniform(29, 38)
+        p["wingate_peak_power_w_kg"] = rng.uniform(14.0, 17.0) if male else rng.uniform(10.5, 13.5)
+        p["wingate_fatigue_index_pct"] = rng.uniform(44, 62)
+        p["sprint_10m_s"] = rng.uniform(1.60, 1.72) if male else rng.uniform(1.78, 1.90)
+        p["max_velocity_ms"] = rng.uniform(9.6, 10.7) if male else rng.uniform(8.5, 9.3)
+        p["agility_505_s"] = rng.uniform(2.30, 2.48) if male else rng.uniform(2.42, 2.60)
+        p["sum7_skinfolds_mm"] = rng.uniform(34, 56) if male else rng.uniform(48, 76)
+
+    if "sprint_10m_s" in p:
+        p["sprint_30m_s"] = p["sprint_10m_s"] * rng.uniform(2.38, 2.48)
+    p["imtp_peak_force_n"] = p["imtp_relative_force_nkg"] * mass
+    p["imtp_rfd_0_250ms_ns"] = p["imtp_peak_force_n"] * rng.uniform(2.4, 3.6)
+    p["wingate_mean_power_w_kg"] = p["wingate_peak_power_w_kg"] * rng.uniform(0.66, 0.75)
+    return p
 
 
 def _value(metric: str, start: float, frac_through: float, code: str, rng) -> float:
     quality, higher_better = POLARITY[metric]
     drift = TRENDS.get(code, {}).get(quality, 0.0) * frac_through
-    # A trend expressed as "better" must move the metric in its own direction.
-    signed = drift if higher_better else -drift
-    v = start * (1 + signed) * (1 + rng.normal(0, NOISE[metric]))
-    return float(v)
+    signed = drift if higher_better else -drift          # move the metric its own way
+    return float(start * (1 + signed) * (1 + rng.normal(0, NOISE[metric])))
 
 
 def _due(day_index: int, interval: int, offset: int) -> bool:
@@ -136,84 +181,72 @@ def _due(day_index: int, interval: int, offset: int) -> bool:
 def _weekday_safe_offsets(days: list[date], rng) -> dict[str, int]:
     """Pick per-test offsets that land on a weekday.
 
-    Every testing interval here is a multiple of seven, so an athlete's test day
-    falls on the same weekday all season. A naive random offset meant whoever
-    drew a Saturday was never tested at all -- entire batteries missing for
-    individual athletes.
-
-    Choosing an offset in 0..4 does not fix it either: which weekday index 0
-    lands on depends on the season start. So pick the target weekday first
-    (Monday to Friday) and derive the offset from the calendar.
+    Every interval here is a multiple of seven, so an athlete's test day falls on
+    the same weekday all season. A naive random offset meant whoever drew a
+    Saturday was never tested at all. Choosing an offset in 0..4 does not fix it
+    either, because which weekday index 0 lands on depends on the season start:
+    pick the target weekday first, then derive the offset from the calendar.
     """
     out: dict[str, int] = {}
     for t in SCHEDULE:
-        target = int(rng.integers(0, 5))                     # Monday..Friday
+        target = int(rng.integers(0, 5))                  # Monday..Friday
         out[t] = next(i for i, d in enumerate(days) if d.weekday() == target)
     return out
 
 
-def write_batteries(out_dir: Path, athletes: list[tuple], days: list[date], rng) -> tuple[int, int]:
+def write_batteries(
+    out_dir: Path, athletes: list[tuple], days: list[date],
+    sport_battery: dict[str, set[str]], rng,
+) -> tuple[int, int]:
     """Write lab_tests.csv and field_tests.csv. Returns (lab_rows, field_rows)."""
-    profiles = {a[0]: _profile(a[1], a[2], a[4], rng) for a in athletes}
-
-    lab_cols = ["imtp_peak_force_n", "imtp_relative_force_nkg", "imtp_rfd_0_250ms_ns",
-                "wingate_peak_power_w_kg", "wingate_mean_power_w_kg", "wingate_fatigue_index_pct"]
-    field_cols = ["sprint_10m_s", "sprint_30m_s", "max_velocity_ms", "agility_505_s",
-                  "yoyo_ir1_distance_m", "body_mass_kg", "sum7_skinfolds_mm"]
-
     lab_rows: list[dict] = []
     field_rows: list[dict] = []
     n = len(days)
 
-    for code, _sport, _sex, _squad, _mass, *_ in athletes:
-        prof = profiles[code]
+    for code, sport, sex, squad, mass, *_ in athletes:
+        prof = _profile(sport, sex, squad, mass, rng)
+        runs = sport_battery.get(sport, set())
         offs = _weekday_safe_offsets(days, rng)
+
         for i, d in enumerate(days):
-            frac = i / max(n - 1, 1)
-
             if d.weekday() > 4:
-                continue  # tests are shifted onto weekdays by the offset above
-            imtp = _due(i, SCHEDULE["IMTP_test"], offs["IMTP_test"])
-            wing = _due(i, SCHEDULE["wingate_test"], offs["wingate_test"])
-            if imtp or wing:
-                row = {"athlete_code": code, "date": d.isoformat()}
-                for c in lab_cols:
-                    is_imtp = c.startswith("imtp")
-                    row[c] = (round(_value(c, prof[c], frac, code, rng), 1)
-                              if (imtp if is_imtp else wing) else "")
-                lab_rows.append(row)
+                continue
+            frac = i / max(n - 1, 1)
+            due = {t: (t in runs and _due(i, SCHEDULE[t], offs[t])) for t in SCHEDULE}
 
-            spr = _due(i, SCHEDULE["sprint_test"], offs["sprint_test"])
-            agi = _due(i, SCHEDULE["agility_test"], offs["agility_test"])
-            aer = _due(i, SCHEDULE["aerobic_test"], offs["aerobic_test"])
-            ant = _due(i, SCHEDULE["anthropometry"], offs["anthropometry"])
-            if spr or agi or aer or ant:
-                row = {"athlete_code": code, "date": d.isoformat()}
-                group = {"sprint_10m_s": spr, "sprint_30m_s": spr, "max_velocity_ms": spr,
-                         "agility_505_s": agi, "yoyo_ir1_distance_m": aer,
-                         "body_mass_kg": ant, "sum7_skinfolds_mm": ant}
-                for c in field_cols:
-                    dp = 3 if c.endswith("_s") else (1 if c != "yoyo_ir1_distance_m" else 0)
-                    row[c] = round(_value(c, prof[c], frac, code, rng), dp) if group[c] else ""
-                field_rows.append(row)
+            def cell(col: str) -> object:
+                if not due.get(TEST_OF[col]) or col not in prof:
+                    return ""
+                dp = 3 if col.endswith("_s") or col == "css_ms" else (
+                    0 if col == "yoyo_ir1_distance_m" else 1)
+                return round(_value(col, prof[col], frac, code, rng), dp)
+
+            if any(due[t] for t in ("IMTP_test", "wingate_test")):
+                lab_rows.append({"athlete_code": code, "date": d.isoformat(),
+                                 **{c: cell(c) for c in LAB_COLS}})
+            if any(due[t] for t in ("sprint_test", "agility_test", "aerobic_test",
+                                    "anthropometry", "swim_test")):
+                field_rows.append({"athlete_code": code, "date": d.isoformat(),
+                                   **{c: cell(c) for c in FIELD_COLS}})
 
     # ---- injected faults, mirroring the force-plate ones -------------------
-    # A 10 m sprint of 0.94 s would be a world record by a distance: a gate was
-    # triggered early. A Yo-Yo of 9999 m is a data-entry sentinel value.
-    field_rows.append({"athlete_code": "ATH-004", "date": days[150].isoformat(),
-                       **{c: "" for c in field_cols}, "sprint_10m_s": 0.94, "sprint_30m_s": 4.31,
+    blank_f = {c: "" for c in FIELD_COLS}
+    blank_l = {c: "" for c in LAB_COLS}
+    # A 0.94 s 10 m would be a world record by a distance: a gate fired early.
+    field_rows.append({"athlete_code": "ATH-007", "date": days[150].isoformat(),
+                       **blank_f, "sprint_10m_s": 0.94, "sprint_30m_s": 4.31,
                        "max_velocity_ms": 8.9})
+    # 9999 is a data-entry sentinel, not a distance.
     field_rows.append({"athlete_code": "ATH-008", "date": days[152].isoformat(),
-                       **{c: "" for c in field_cols}, "yoyo_ir1_distance_m": 9999})
+                       **blank_f, "yoyo_ir1_distance_m": 9999})
+    # An athlete code that is not on the roster.
     lab_rows.append({"athlete_code": "ATH-777", "date": days[154].isoformat(),
-                     **{c: "" for c in lab_cols}, "imtp_relative_force_nkg": 38.0,
-                     "imtp_peak_force_n": 3000.0})
+                     **blank_l, "imtp_relative_force_nkg": 38.0, "imtp_peak_force_n": 3000.0})
 
     with (out_dir / "lab_tests.csv").open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=["athlete_code", "date"] + lab_cols)
+        w = csv.DictWriter(fh, fieldnames=["athlete_code", "date"] + LAB_COLS)
         w.writeheader(); w.writerows(lab_rows)
     with (out_dir / "field_tests.csv").open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=["athlete_code", "date"] + field_cols)
+        w = csv.DictWriter(fh, fieldnames=["athlete_code", "date"] + FIELD_COLS)
         w.writeheader(); w.writerows(field_rows)
-
     return len(lab_rows), len(field_rows)

@@ -81,16 +81,30 @@ def test_a_rejected_trial_is_never_presented_as_a_measurement():
     metric for an athlete whose real jumps are around 30 cm."""
     from streamlit.testing.v1 import AppTest
 
-    at = AppTest.from_file(str(APP), default_timeout=200).run()
+    # Find the rejected trial from the database rather than hard-coding an
+    # athlete. A previous version named ATH-007; when the roster changed sport
+    # the seeded fault moved to another athlete and this test skipped silently,
+    # which is the failure mode it exists to catch.
+    from src.analytics.queries import _df
+
+    rejected = _df(
+        "select athlete_code, source_ref from data_quality_log "
+        "where rule = 'cmj_rejected' and detail like '%outside 0.05-1.20%' "
+        "order by issue_id desc limit 1"
+    )
+    assert not rejected.empty, "the synthetic data no longer seeds an impossible jump"
+    code = rejected["athlete_code"].iloc[0]
+    bad = rejected["source_ref"].iloc[0].rsplit("_", 1)[1].removesuffix(".csv")
+
+    at = AppTest.from_file(str(APP), default_timeout=240).run()
     boxes = {s.label: s for s in at.selectbox}
-    if "ATH-007" not in boxes["Athlete detail"].options:
-        pytest.skip("the seeded bad trial is not present in this dataset")
-    boxes["Athlete detail"].set_value("ATH-007").run()
+    assert code in boxes["Athlete detail"].options, f"{code} is not selectable"
+    boxes["Athlete detail"].set_value(code).run()
 
     trial = {s.label: s for s in at.selectbox}["Trial"]
-    bad = "2026-08-14"
-    if not any(o.startswith(bad) for o in trial.options):
-        pytest.skip("the seeded bad trial has no raw file here")
+    assert any(o.startswith(bad) for o in trial.options), (
+        f"the rejected trial {bad} is not offered in the picker"
+    )
     trial.set_value(bad).run()
 
     errors = " ".join(e.value for e in at.error)

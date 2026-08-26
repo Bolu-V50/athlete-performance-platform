@@ -1,13 +1,17 @@
 athlete_code,sport,sex,squad
-ATH-001,Athletics,M,Sprints
-ATH-002,Athletics,M,Sprints
-ATH-003,Athletics,F,Sprints
-ATH-004,Athletics,F,Jumps
-ATH-005,Athletics,M,Jumps
-ATH-006,Athletics,M,Jumps
-ATH-007,Netball,F,Netball-Senior
-ATH-008,Netball,F,Netball-Senior
-ATH-009,Netball,F,Netball-Senior
-ATH-010,Netball,F,Netball-Senior
-ATH-011,Athletics,M,Sprints
-ATH-012,Athletics,F,Jumps
+ATH-001,Swimming,M,Swimming - Sprint
+ATH-002,Swimming,M,Swimming - Sprint
+ATH-003,Swimming,F,Swimming - Sprint
+ATH-004,Swimming,F,Swimming - Distance
+ATH-005,Swimming,M,Swimming - Distance
+ATH-006,Swimming,F,Swimming - Distance
+ATH-007,Football,F,Football - Women
+ATH-008,Football,F,Football - Women
+ATH-009,Football,F,Football - Women
+ATH-010,Football,F,Football - Women
+ATH-011,Basketball,M,Basketball - Men
+ATH-012,Basketball,M,Basketball - Men
+ATH-013,Basketball,M,Basketball - Men
+ATH-014,Athletics,M,Athletics - Sprints
+ATH-015,Athletics,M,Athletics - Sprints
+ATH-016,Athletics,F,Athletics - Sprints

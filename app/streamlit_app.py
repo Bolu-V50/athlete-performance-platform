@@ -259,7 +259,10 @@ with st.expander("Full squad"):
 # ---------------------------------------------------------------------------
 st.divider()
 row = status[status["athlete_code"] == chosen_athlete].iloc[0]
-st.subheader(f"{chosen_athlete} · {row.squad} · {row.sport}")
+# Squad names in this programme already carry the sport ("Football - Women"),
+# so repeating it reads as a mistake rather than as extra information.
+_sport_suffix = "" if str(row.sport).lower() in str(row.squad).lower() else f" · {row.sport}"
+st.subheader(f"{chosen_athlete} · {row.squad}{_sport_suffix}")
 
 narrative = load_narrative(chosen_athlete)
 st.info(narrative.text, icon="🧠")

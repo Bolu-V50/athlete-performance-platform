@@ -33,15 +33,19 @@ def test_every_lower_is_better_metric_is_declared(catalog):
     } <= lower
 
 
-def test_every_quality_has_exactly_one_headline_metric(catalog):
-    """The capability profile shows one row per quality; two headline metrics in
-    a quality would silently duplicate it, none would hide it."""
+def test_every_quality_has_at_least_one_headline_metric(catalog):
+    """A quality with no headline metric is silently absent from every capability
+    profile -- which is exactly how body composition went missing.
+
+    More than one headline per quality is deliberate: power carries both jump
+    height and RSI-mod, and speed carries a 10 m sprint for land athletes and a
+    100 m freestyle for swimmers. An athlete only ever has data for the tests
+    their sport runs, so the profile still shows one row per measured quality.
+    """
     headline = catalog[catalog["is_headline"]]
-    counts = headline.groupby("quality").size()
-    duplicated = counts[counts > 1]
-    # neuromuscular power deliberately carries two: jump height and RSI-mod
-    assert set(duplicated.index) <= {"power"}
-    assert set(catalog["quality"]) == set(headline["quality"]), "a quality has no headline metric"
+    assert set(catalog["quality"]) == set(headline["quality"]), (
+        f"no headline metric for: {set(catalog['quality']) - set(headline['quality'])}"
+    )
 
 
 def test_every_catalogued_metric_has_an_acceptance_range(catalog):
@@ -112,12 +116,36 @@ def test_test_day_z_scores_are_polarity_corrected():
     )
 
 
-def test_all_seven_qualities_are_populated_for_every_athlete():
+# Qualities every sport in the programme measures, whatever else it does.
+UNIVERSAL_QUALITIES = {"power", "max_strength", "anaerobic", "body_comp"}
+
+
+def test_every_athlete_has_the_universally_measured_qualities():
     from src.analytics.queries import _df
 
     df = _df(
-        "select athlete_code, count(distinct quality) q from v_quality_profile "
-        "group by athlete_code"
+        "select athlete_code, quality from v_quality_profile"
     )
     assert not df.empty
-    assert (df["q"] >= 7).all(), f"an athlete is missing qualities: {df.to_dict('records')}"
+    for code, grp in df.groupby("athlete_code"):
+        missing = UNIVERSAL_QUALITIES - set(grp["quality"])
+        assert not missing, f"{code} is missing {missing}"
+
+
+def test_a_sport_only_carries_qualities_its_battery_measures():
+    """Swimmers do not run a 505, so they must have no change-of-direction row.
+    A profile that invented one would mean the pipeline is attributing another
+    sport's test to them."""
+    from src.analytics.queries import _df
+
+    df = _df(
+        "select a.sport, p.quality, count(*) n from v_quality_profile p "
+        "join athletes a using (athlete_id) group by a.sport, p.quality"
+    )
+    swim = set(df[df["sport"] == "Swimming"]["quality"])
+    assert "cod" not in swim, "swimmers have change-of-direction data they never tested for"
+    assert "speed" in swim, "swimmers should have speed from the pool time-trial"
+    assert "aerobic" in swim, "swimmers should have aerobic from critical swim speed"
+
+    football = set(df[df["sport"] == "Football"]["quality"])
+    assert {"cod", "aerobic", "speed"} <= football

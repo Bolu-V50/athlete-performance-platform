@@ -39,24 +39,45 @@ SEASON_DAYS = 180
 SAMPLE_RATE = 1000
 
 ATHLETES = [
-    # code,      sport,        sex, squad,            mass, baseline h, fatigue block
-    ("ATH-001", "Athletics", "M", "Sprints",        78.0, 0.42, None),
-    ("ATH-002", "Athletics", "M", "Sprints",        84.5, 0.38, (120, 134)),
-    ("ATH-003", "Athletics", "F", "Sprints",        61.0, 0.31, None),
-    ("ATH-004", "Athletics", "F", "Jumps",          58.5, 0.36, None),
-    ("ATH-005", "Athletics", "M", "Jumps",          75.0, 0.47, None),
-    ("ATH-006", "Athletics", "M", "Jumps",          80.0, 0.44, (176, 179)),
-    ("ATH-007", "Netball",   "F", "Netball-Senior", 72.0, 0.28, None),
-    ("ATH-008", "Netball",   "F", "Netball-Senior", 68.5, 0.30, None),
-    ("ATH-009", "Netball",   "F", "Netball-Senior", 75.5, 0.26, (174, 179)),
-    ("ATH-010", "Netball",   "F", "Netball-Senior", 70.0, 0.29, (96, 110)),
-    ("ATH-011", "Athletics", "M", "Sprints",        82.0, 0.40, None),
-    ("ATH-012", "Athletics", "F", "Jumps",          60.0, 0.34, None),
+    # code,      sport,        sex, squad,                mass, baseline CMJ h, fatigue block
+    # --- Swimming: strong vertically, unremarkable on land-running tests -----
+    ("ATH-001", "Swimming",   "M", "Swimming - Sprint",   79.0, 0.41, None),
+    ("ATH-002", "Swimming",   "M", "Swimming - Sprint",   82.5, 0.39, (120, 134)),
+    ("ATH-003", "Swimming",   "F", "Swimming - Sprint",   66.0, 0.31, None),
+    ("ATH-004", "Swimming",   "F", "Swimming - Distance", 62.5, 0.28, None),
+    ("ATH-005", "Swimming",   "M", "Swimming - Distance", 74.0, 0.35, None),
+    ("ATH-006", "Swimming",   "F", "Swimming - Distance", 64.0, 0.29, None),
+    # --- Football: the population Yo-Yo IR1 was actually validated on --------
+    ("ATH-007", "Football",   "F", "Football - Women",    63.0, 0.31, None),
+    ("ATH-008", "Football",   "F", "Football - Women",    58.5, 0.33, None),
+    ("ATH-009", "Football",   "F", "Football - Women",    67.5, 0.29, (174, 179)),
+    ("ATH-010", "Football",   "F", "Football - Women",    61.0, 0.32, (96, 110)),
+    # --- Basketball: tall, heavy, highest jumps in the programme -------------
+    ("ATH-011", "Basketball", "M", "Basketball - Men",    96.0, 0.48, None),
+    ("ATH-012", "Basketball", "M", "Basketball - Men",   102.0, 0.45, None),
+    ("ATH-013", "Basketball", "M", "Basketball - Men",    89.5, 0.52, None),
+    # --- Athletics sprints: fastest on the track, worst on the Yo-Yo ---------
+    ("ATH-014", "Athletics",  "M", "Athletics - Sprints", 80.0, 0.46, (176, 179)),
+    ("ATH-015", "Athletics",  "M", "Athletics - Sprints", 77.5, 0.44, None),
+    ("ATH-016", "Athletics",  "F", "Athletics - Sprints", 59.0, 0.36, None),
 ]
 
 # Athletes whose training load spikes late in the block, so ACWR has something
 # real to flag rather than a number that never leaves the sweet spot.
 LOAD_SPIKE = {"ATH-002": (118, 136), "ATH-010": (94, 112), "ATH-009": (172, 179)}
+
+# Which batteries each sport actually runs. A land-based Yo-Yo IR1 and a 10 m
+# sprint say very little about a swimmer; running them anyway would fill the
+# database with numbers no coach would act on.
+SPORT_BATTERY = {
+    "Swimming":   {"IMTP_test", "wingate_test", "anthropometry", "swim_test"},
+    "Football":   {"IMTP_test", "wingate_test", "sprint_test", "agility_test",
+                   "aerobic_test", "anthropometry"},
+    "Basketball": {"IMTP_test", "wingate_test", "sprint_test", "agility_test",
+                   "aerobic_test", "anthropometry"},
+    "Athletics":  {"IMTP_test", "wingate_test", "sprint_test", "agility_test",
+                   "anthropometry"},
+}
 
 
 def season_dates() -> list[date]:
@@ -158,7 +179,7 @@ def _inject_bad_traces(rng: np.random.Generator, days: list[date]) -> int:
 
     # 3. A physiologically impossible jump -- a mis-set plate amplifier gain.
     tr = synth_cmj_trace(mass_kg=70, jump_height_m=1.55, quiet_s=1.0, tail_s=0.4, seed=903)
-    _write_trace(TRACES / f"ATH-007_{days[168].isoformat()}.csv", tr, rng)
+    _write_trace(TRACES / f"ATH-013_{days[168].isoformat()}.csv", tr, rng)
     n += 1
 
     return n
@@ -206,7 +227,7 @@ def main() -> None:
     write_roster()
     n_traces = write_force_traces(rng)
     n_srpe = write_srpe_diary(rng)
-    n_lab, n_field = write_batteries(OUT, ATHLETES, season_dates(), rng)
+    n_lab, n_field = write_batteries(OUT, ATHLETES, season_dates(), SPORT_BATTERY, rng)
     size_mb = sum(p.stat().st_size for p in TRACES.glob("*.csv")) / 1e6
     print(f"roster        : {len(ATHLETES)} athletes -> data/synthetic/athletes.csv")
     print(f"force traces  : {n_traces} files ({size_mb:.1f} MB) -> data/synthetic/force_plate/")
