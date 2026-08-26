@@ -1,0 +1,68 @@
+name: CI
+
+# Runs on every push and pull request. Two things happen here that are worth
+# separating: the test suite, and the database migration. Applying schema.sql,
+# catalog.sql and the view definitions from CI is what makes them a migration
+# rather than a file someone once pasted into a SQL console -- they are
+# re-applied, in order, on every change, and a definition that no longer applies
+# cleanly fails the build.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Two runs applying view definitions to the same database at once is a race.
+  group: database-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Check credentials are present
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::SUPABASE_DB_URL is not set. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "database secret present"
+
+      - name: Apply schema and catalogue
+        run: python -m src.db.apply_schema
+
+      - name: Apply analytics views
+        run: python -m src.db.apply_views
+
+      - name: Generate the synthetic dataset
+        # 41 MB of raw force-plate traces are deliberately not in the repository.
+        # The generator is seeded, so this reproduces them byte for byte and the
+        # pipeline tests have real waveforms to work on.
+        run: python scripts/generate_synthetic_data.py
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Database health check
+        run: python -m src.ops.health_check

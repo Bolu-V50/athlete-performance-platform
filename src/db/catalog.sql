@@ -23,12 +23,18 @@ create table if not exists metric_catalog (
     -- quality, polarity) is source-independent and is what the analytics join on.
     session_type     text not null,     -- primary test that produces it
     source           text not null,     -- primary device / method
-    higher_is_better boolean not null,
+    -- NULL means the metric has no meaningful direction: a phase duration is
+    -- context, not an achievement, and forcing a polarity onto it would make
+    -- every trend and z-score computed from it a fabrication. Views return NULL
+    -- for improvement and z on these rather than guessing.
+    higher_is_better boolean,
     is_headline      boolean not null default false,
     typical_min      numeric,           -- physiological acceptance range
     typical_max      numeric,
     description      text
 );
+
+alter table metric_catalog alter column higher_is_better drop not null;
 
 create index if not exists idx_catalog_quality on metric_catalog(quality);
 create index if not exists idx_catalog_session on metric_catalog(session_type);
@@ -42,6 +48,23 @@ insert into metric_catalog (metric_name, display_name, unit, quality, session_ty
 ('peak_force_bw',            'CMJ peak force',          'xBW',    'power',        'CMJ_test',    'force_plate',      true,  false, 1.20,  5.00, 'Peak vertical force in body weights'),
 ('contraction_time_s',        'CMJ contraction time',   's',      'power',        'CMJ_test',    'force_plate',      false, false, 0.20,  1.60, 'Onset to take-off; longer under fatigue'),
 ('countermovement_depth_m',   'Countermovement depth',  'm',      'power',        'CMJ_test',    'force_plate',      true,  false, -0.70, 0.00, 'Lowest centre-of-mass displacement; strategy marker'),
+-- Remaining CMJ outputs. These were being stored by the pipeline and, because
+-- every view joins the catalogue, silently dropped from the entire system --
+-- present in the table, invisible everywhere else. The scheduled health check
+-- found them on its first run.
+('jump_height_flight_time_m',  'CMJ height (flight time)','m',     'power',        'CMJ_test',    'force_plate',      true,  false, 0.05,  1.20, 'Flight-time estimate, reported as a cross-check on the impulse-momentum value; they diverge when landing posture differs from take-off'),
+('takeoff_velocity_ms',        'Take-off velocity',      'm/s',    'power',        'CMJ_test',    'force_plate',      true,  false, 0.90,  5.00, 'Vertical velocity at take-off, from net impulse'),
+('peak_force_n',               'CMJ peak force',         'N',      'power',        'CMJ_test',    'force_plate',      true,  false, 400,   6000, 'Absolute peak vertical force; the body-weight multiple is the comparable form'),
+('peak_power_w',               'CMJ peak power',         'W',      'power',        'CMJ_test',    'force_plate',      true,  false, 800,   9000, 'Absolute peak concentric power'),
+('net_impulse_ns',             'Net vertical impulse',   'N.s',    'power',        'CMJ_test',    'force_plate',      true,  false, 40,    600,  'Integral of force above body weight from onset to take-off; jump height is derived from this'),
+('flight_time_s',              'Flight time',            's',      'power',        'CMJ_test',    'force_plate',      true,  false, 0.20,  1.00, 'Airborne duration'),
+('body_weight_n',              'Body weight',            'N',      'body_comp',    'CMJ_test',    'force_plate',      null,  false, 350,   1600, 'From the quiet-standing period; a calibration output, not a performance measure'),
+-- Phase durations carry NULL polarity. Longer is not simply worse: a longer
+-- eccentric phase can mean a deeper countermovement rather than a slower
+-- athlete, and asserting a direction would manufacture trends.
+('unweighting_duration_s',     'Unweighting duration',   's',      'power',        'CMJ_test',    'force_plate',      null,  false, 0.05,  1.20, 'Onset to peak downward velocity; jump strategy'),
+('ecc_duration_s',             'Braking duration',       's',      'power',        'CMJ_test',    'force_plate',      null,  false, 0.02,  0.80, 'Peak downward velocity to zero velocity'),
+('con_duration_s',             'Propulsion duration',    's',      'power',        'CMJ_test',    'force_plate',      null,  false, 0.05,  0.80, 'Zero velocity to take-off'),
 -- ---- maximal strength: isometric mid-thigh pull ----
 ('imtp_peak_force_n',         'IMTP peak force',        'N',      'max_strength', 'IMTP_test',   'force_plate',      true,  false, 800,   6000, 'Peak isometric force in the mid-thigh pull position'),
 ('imtp_relative_force_nkg',   'IMTP relative force',    'N/kg',   'max_strength', 'IMTP_test',   'force_plate',      true,  true,  15.0,  70.0, 'Peak force per kilogram; the comparable strength number'),

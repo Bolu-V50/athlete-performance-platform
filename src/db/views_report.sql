@@ -67,13 +67,13 @@ select
     round(stddev_samp(metric_value) over w::numeric, 4) as squad_sd,
     count(*) over w                                     as squad_n,
     round((
-        (case when higher_is_better then 1 else -1 end)
+        (case higher_is_better when true then 1 when false then -1 else null end)
         * (metric_value - avg(metric_value) over w)
         / nullif(stddev_samp(metric_value) over w, 0)
     )::numeric, 2)                                      as z_vs_squad,
     rank() over (
         partition by squad, metric_name
-        order by case when higher_is_better then -metric_value else metric_value end
+        order by case higher_is_better when true then -metric_value else metric_value end
     )                                                   as squad_rank
 from latest l
 window w as (partition by squad, metric_name);
@@ -112,7 +112,7 @@ select
     round(avg(metric_value) filter (where bucket = 'recent')::numeric, 3) as recent_mean,
     round(avg(metric_value) filter (where bucket = 'prior')::numeric, 3)  as prior_mean,
     round((
-        (case when higher_is_better then 1 else -1 end)
+        (case higher_is_better when true then 1 when false then -1 else null end)
         * (avg(metric_value) filter (where bucket = 'recent')
            - avg(metric_value) filter (where bucket = 'prior'))
         / nullif(avg(metric_value) filter (where bucket = 'prior'), 0) * 100

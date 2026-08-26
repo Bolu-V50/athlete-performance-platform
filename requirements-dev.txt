@@ -3,3 +3,5 @@
 pytest==9.1.1
 playwright==1.62.0
 pillow==12.3.0
+PyYAML==6.0.3
+PyYAML==6.0.3

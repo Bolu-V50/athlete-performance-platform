@@ -1,0 +1,41 @@
+name: Data health
+
+# A scheduled audit of the database contents.
+#
+# This is deliberately NOT a nightly re-run of the ingest pipeline. The dataset
+# is static and its raw files are not in the repository, so a scheduled ingest
+# would be an empty loop producing a green tick and nothing else. What is worth
+# running on a schedule is the question a green tick cannot answer: is the data
+# in there still coherent?
+#
+# The checks are falsifiable invariants, and the job fails when one breaks. On
+# its very first run it found eleven metrics that the pipeline was storing and
+# every view was silently dropping.
+
+on:
+  schedule:
+    - cron: '0 19 * * *'      # 19:00 UTC = 06:00 next day in Sydney (AEDT)
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      # Uncomment in a live deployment to make a stale database a hard failure.
+      # A pipeline that quietly stopped three days ago is the most common way a
+      # platform like this fails without anyone noticing.
+      # FRESHNESS_DAYS: '2'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run invariant checks
+        # No output is redirected and the exit code is the verdict. A health
+        # check whose failures are invisible to the caller is worse than none.
+        run: python -m src.ops.health_check

@@ -9,6 +9,14 @@
 -- CREATE OR REPLACE VIEW can only append columns, never insert one in the
 -- middle, so a column added to an existing view fails with "cannot change name
 -- of view column". Dropping in dependency order keeps this file re-runnable.
+-- Dependency order matters and it spans files: the report views in
+-- views_report.sql are built on v_metric_history, so they have to go first even
+-- though they are defined elsewhere. Listing them here rather than reaching for
+-- DROP ... CASCADE keeps the teardown explicit -- CASCADE would happily remove
+-- something nobody remembered was downstream.
+drop view if exists v_squad_comparison;
+drop view if exists v_metric_reliability;
+drop view if exists v_recent_vs_prior;
 drop view if exists v_test_day;
 drop view if exists v_quality_profile;
 drop view if exists v_metric_trend;
@@ -95,20 +103,20 @@ select distinct
     round(own_sd::numeric, 4)                    as own_sd,
     round(((latest_value - first_value) / nullif(first_value, 0) * 100)::numeric, 1)
         as pct_change,
-    round(((case when higher_is_better then 1 else -1 end)
+    round(((case higher_is_better when true then 1 when false then -1 else null end)
            * (latest_value - first_value) / nullif(first_value, 0) * 100)::numeric, 1)
         as pct_improvement,
-    round(((case when higher_is_better then 1 else -1 end)
+    round(((case higher_is_better when true then 1 when false then -1 else null end)
            * (latest_value - first_value) / nullif(own_sd, 0))::numeric, 2)
         as change_in_sd,
     -- fitted change across the whole series, which is what direction uses
     round((slope_per_day * (latest_date - first_date))::numeric, 4)
         as fitted_change,
-    round(((case when higher_is_better then 1 else -1 end)
+    round(((case higher_is_better when true then 1 when false then -1 else null end)
            * slope_per_day * (latest_date - first_date)
            / nullif(first_value, 0) * 100)::numeric, 1)
         as pct_improvement_fitted,
-    round(((case when higher_is_better then 1 else -1 end)
+    round(((case higher_is_better when true then 1 when false then -1 else null end)
            * slope_per_day * (latest_date - first_date)
            / nullif(own_sd, 0))::numeric, 2)
         as fitted_change_in_sd,
@@ -177,7 +185,7 @@ select
     h.is_headline,
     round(h.metric_value::numeric, 3) as value,
     round(t.own_mean_r::numeric, 3)   as athlete_mean,
-    round((case when h.higher_is_better then 1 else -1 end
+    round((case h.higher_is_better when true then 1 when false then -1 else null end
            * (h.metric_value - t.own_mean_r) / nullif(t.own_sd_r, 0))::numeric, 2)
         as z_vs_own_mean
 from v_metric_history h

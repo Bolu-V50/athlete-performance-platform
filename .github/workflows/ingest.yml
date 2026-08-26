@@ -1,0 +1,71 @@
+name: Ingest pipeline
+
+# Manual trigger only, and that is the honest setting for this repository.
+#
+# In a live service this would run on a schedule: force-plate exports and sRPE
+# diaries arrive daily and do not load themselves. Here the dataset is static,
+# so a nightly run would re-read the same files and change nothing. Scheduling
+# it anyway would be a green tick standing in for work that is not happening.
+#
+# What this job does prove is that the pipeline runs unattended against a cloud
+# database with credentials from a secret store, and that it is idempotent: run
+# it twice and the row counts do not move.
+
+on:
+  workflow_dispatch:
+    inputs:
+      regenerate:
+        description: 'Regenerate the synthetic dataset before ingesting'
+        type: boolean
+        default: true
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Generate the synthetic dataset
+        if: ${{ inputs.regenerate }}
+        run: python scripts/generate_synthetic_data.py
+
+      - name: Run the pipeline
+        run: python -m src.ingest.pipeline
+
+      - name: Run it again and prove nothing changed
+        # Idempotency is the property that makes an unattended pipeline safe to
+        # re-run after a partial failure. Asserting it here means a regression
+        # that reintroduces duplicate writes fails the job rather than quietly
+        # doubling the database.
+        run: |
+          python - <<'PY'
+          from sqlalchemy import text
+          from src.db.connection import get_engine
+          from src.ingest.pipeline import run_pipeline
+
+          def counts():
+              with get_engine().connect() as c:
+                  return {t: c.execute(text(f"select count(*) from {t}")).scalar()
+                          for t in ("athletes", "sessions", "performance_metrics", "training_load")}
+
+          before = counts()
+          run_pipeline(verbose=False)
+          after = counts()
+          print("before:", before)
+          print("after :", after)
+          if before != after:
+              raise SystemExit(f"pipeline is not idempotent: {before} -> {after}")
+          print("row counts unchanged across a repeat run")
+          PY
+
+      - name: Database health check
+        run: python -m src.ops.health_check
