@@ -22,5 +22,5 @@ venv/
 
 # --- outputs ---
 *.log
-figures/*.png
-!figures/.gitkeep
+# figures/ is committed on purpose: the README's force-time diagnostic and the
+# dashboard screenshot are part of what the repository is meant to show.
