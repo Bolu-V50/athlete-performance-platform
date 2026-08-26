@@ -44,10 +44,10 @@ ATHLETES = [
     ("ATH-003", "Athletics", "F", "Sprints",        61.0, 0.31, None),
     ("ATH-004", "Athletics", "F", "Jumps",          58.5, 0.36, None),
     ("ATH-005", "Athletics", "M", "Jumps",          75.0, 0.47, None),
-    ("ATH-006", "Athletics", "M", "Jumps",          80.0, 0.44, (70, 84)),
+    ("ATH-006", "Athletics", "M", "Jumps",          80.0, 0.44, (86, 89)),
     ("ATH-007", "Netball",   "F", "Netball-Senior", 72.0, 0.28, None),
     ("ATH-008", "Netball",   "F", "Netball-Senior", 68.5, 0.30, None),
-    ("ATH-009", "Netball",   "F", "Netball-Senior", 75.5, 0.26, None),
+    ("ATH-009", "Netball",   "F", "Netball-Senior", 75.5, 0.26, (84, 89)),
     ("ATH-010", "Netball",   "F", "Netball-Senior", 70.0, 0.29, (30, 40)),
     ("ATH-011", "Athletics", "M", "Sprints",        82.0, 0.40, None),
     ("ATH-012", "Athletics", "F", "Jumps",          60.0, 0.34, None),
@@ -55,7 +55,7 @@ ATHLETES = [
 
 # Athletes whose training load spikes late in the block, so ACWR has something
 # real to flag rather than a number that never leaves the sweet spot.
-LOAD_SPIKE = {"ATH-002": (50, 66), "ATH-010": (28, 42)}
+LOAD_SPIKE = {"ATH-002": (50, 66), "ATH-010": (28, 42), "ATH-009": (82, 89)}
 
 
 def season_dates() -> list[date]:
@@ -167,8 +167,8 @@ def write_srpe_diary(rng: np.random.Generator) -> int:
             if wd in (1, 4):
                 srpe = float(np.clip(srpe + 1.4, 1, 10))     # hard days
             if spike and spike[0] <= i <= spike[1]:
-                duration *= 1.45
-                srpe = float(np.clip(srpe + 1.6, 1, 10))
+                duration *= 1.85
+                srpe = float(np.clip(srpe + 2.6, 1, 10))
             rows.append((code, d.isoformat(), round(duration, 1), round(srpe, 1)))
 
     # 4. sRPE outside the Borg CR-10 scale -- a data-entry slip.
