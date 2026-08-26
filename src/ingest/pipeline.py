@@ -22,7 +22,6 @@ that happens to load data once:
 from __future__ import annotations
 
 import argparse
-import re
 import traceback
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -34,6 +33,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from src.db.connection import get_engine
+from src.ingest.naming import TRACE_NAME, iter_trace_files  # noqa: F401
 from src.signal_processing.cmj import analyse_cmj
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,9 +66,6 @@ METRIC_KEYS = [
     "flight_time_s",
     "countermovement_depth_m",
 ]
-
-TRACE_NAME = re.compile(r"^(?P<code>[A-Za-z0-9\-]+)_(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
-
 
 # ---------------------------------------------------------------------------
 # run bookkeeping
@@ -154,12 +151,14 @@ def athlete_index(conn: Connection) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 # force-plate branch
 # ---------------------------------------------------------------------------
-def extract_force_files(directory: Path) -> Iterator[tuple[Path, str, date]]:
-    for p in sorted(directory.glob("*.csv")):
-        m = TRACE_NAME.match(p.name)
-        if not m:
-            continue
-        yield p, m["code"], date.fromisoformat(m["date"])
+def extract_force_files(directory: Path) -> Iterator[tuple[Path, str | None, date | None]]:
+    """Yield every CSV, including the ones whose names do not parse.
+
+    Skipping a malformed filename without saying so means a trial can vanish
+    between the collection laptop and the database with nothing to show for it.
+    The caller records these as a data-quality issue.
+    """
+    yield from iter_trace_files(directory)
 
 
 def _upsert_session(conn: Connection, athlete_id: int, d: date, kind: str) -> int:
@@ -183,6 +182,11 @@ def ingest_force_plate(conn: Connection, st: RunStats, directory: Path, known: d
     for path, code, d in extract_force_files(directory):
         st.read += 1
         ref = path.name
+
+        if code is None or d is None:
+            st.reject(ref, None, "unparseable_filename",
+                      "expected <ATHLETE_CODE>_<YYYY-MM-DD>.csv; file not ingested")
+            continue
 
         if code not in known:
             st.reject(ref, code, "unknown_athlete_code",

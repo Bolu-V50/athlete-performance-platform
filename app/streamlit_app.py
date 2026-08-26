@@ -379,27 +379,68 @@ if not trace_dates:
         "regenerate the full set."
     )
 else:
-    picked = st.selectbox("Trial", trace_dates, key="trial_pick",
-                          help="Dates with a raw waveform file available")
+    ingested = q.ingested_session_dates(chosen_athlete)
+
+    def label(d: str) -> str:
+        return d if d in ingested else f"{d}  ·  not in database"
+
+    picked = st.selectbox(
+        "Trial", trace_dates, key="trial_pick", format_func=label,
+        help="Dates with a raw waveform file. A trial can have a file on disk and still have "
+             "been excluded by pipeline validation.",
+    )
     path = q.find_trace(chosen_athlete, picked)
     if path is None:
         st.info("Raw trace not found on disk.")
     else:
         try:
             result = analyse_trace(str(path))
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Jump height", f"{result.jump_height_m * 100:.1f} cm")
-            m2.metric("RSI-mod", f"{result.rsi_mod:.2f}")
-            m3.metric("Peak force", f"{result.peak_force_bw:.2f} ×BW")
-            m4.metric("Peak power", f"{result.peak_power_w_kg:.0f} W/kg")
-            m5.metric("Contraction", f"{result.contraction_time_s * 1000:.0f} ms")
+            rejects = [f for f in result.quality_flags if f.startswith("REJECT")]
+
+            # A trial the pipeline threw away must never be presented as a
+            # measurement. The waveform is still drawn -- inspecting a bad trace
+            # is exactly how a practitioner works out what went wrong with the
+            # plate -- but its numbers are not headline numbers.
+            if not result.is_valid:
+                st.error(
+                    "**This trial was rejected by pipeline validation and is not in the "
+                    "database.** " + " ".join(rejects),
+                    icon="🚫",
+                )
+                st.caption(
+                    "The waveform is shown so the fault can be diagnosed. The values below are "
+                    "what the algorithm computed from a bad trace; they are not a measurement "
+                    "of this athlete."
+                )
+                with st.expander("Values computed from the rejected trace"):
+                    r1, r2, r3 = st.columns(3)
+                    r1.metric("Jump height", f"{result.jump_height_m * 100:.1f} cm")
+                    r2.metric("Peak force", f"{result.peak_force_bw:.2f} ×BW")
+                    r3.metric("Body weight", f"{result.body_mass_kg:.1f} kg")
+            else:
+                if picked not in ingested:
+                    st.warning(
+                        "This trial passes validation but has not been ingested. Run the pipeline "
+                        "to load it.",
+                        icon="⚠️",
+                    )
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("Jump height", f"{result.jump_height_m * 100:.1f} cm")
+                m2.metric("RSI-mod", f"{result.rsi_mod:.2f}")
+                m3.metric("Peak force", f"{result.peak_force_bw:.2f} ×BW")
+                m4.metric("Peak power", f"{result.peak_power_w_kg:.0f} W/kg")
+                m5.metric("Contraction", f"{result.contraction_time_s * 1000:.0f} ms")
+
             fig = plot_cmj(result, title=f"{chosen_athlete} · {picked}", theme=theme_name())
             st.pyplot(fig, width='stretch')
-            if result.quality_flags:
-                st.warning(" · ".join(result.quality_flags), icon="⚠️")
+
+            warns = [f for f in result.quality_flags if not f.startswith("REJECT")]
+            if warns:
+                st.warning(" · ".join(warns), icon="⚠️")
             st.caption(
                 "Computed live from the raw dual-plate waveform, not read back from the database — "
-                "this is the same function the ingest pipeline runs."
+                "this is the same function the ingest pipeline runs, so the dashboard and the "
+                "pipeline cannot disagree about whether a trial is valid."
             )
         except Exception as exc:
             st.error(f"Could not analyse this trace: {type(exc).__name__}: {exc}")

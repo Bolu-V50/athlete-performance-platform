@@ -72,3 +72,41 @@ def test_attention_ordering_puts_the_worst_case_first():
     if len(top) > 1 and top["z_score"].notna().all():
         z = top["z_score"].astype(float).tolist()
         assert z == sorted(z), f"attention queue is not ordered worst-first: {z}"
+
+
+def test_a_rejected_trial_is_never_presented_as_a_measurement():
+    """A trial the pipeline threw away must not appear on screen as a result.
+    The synthetic data plants a trial with a mis-set amplifier gain that reads
+    1.548 m; before this fix the dashboard showed '154.8 cm' as a headline
+    metric for an athlete whose real jumps are around 30 cm."""
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(APP), default_timeout=200).run()
+    boxes = {s.label: s for s in at.selectbox}
+    if "ATH-007" not in boxes["Athlete detail"].options:
+        pytest.skip("the seeded bad trial is not present in this dataset")
+    boxes["Athlete detail"].set_value("ATH-007").run()
+
+    trial = {s.label: s for s in at.selectbox}["Trial"]
+    bad = "2026-08-14"
+    if not any(o.startswith(bad) for o in trial.options):
+        pytest.skip("the seeded bad trial has no raw file here")
+    trial.set_value(bad).run()
+
+    errors = " ".join(e.value for e in at.error)
+    assert "rejected by pipeline validation" in errors
+    assert "outside 0.05-1.20" in errors
+    # and the impossible value must not be sitting in the headline metric row
+    headline = [m for m in at.metric if m.label in ("RSI-mod", "Peak power", "Contraction")]
+    assert not headline, "headline metrics are still rendered for a rejected trial"
+
+
+def test_trial_picker_offers_no_malformed_dates():
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(APP), default_timeout=200).run()
+    trial = [s for s in at.selectbox if s.label == "Trial"]
+    if not trial:
+        pytest.skip("no raw traces available")
+    for option in trial[0].options:
+        assert len(option.split("  ·")[0]) == 10, f"malformed trial date offered: {option!r}"

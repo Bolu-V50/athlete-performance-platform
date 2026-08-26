@@ -14,6 +14,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from src.db.connection import get_engine
+from src.ingest.naming import parse_trace_name
 
 SAMPLE_TRACES = Path(__file__).resolve().parents[2] / "data" / "synthetic" / "sample_traces"
 ALL_TRACES = Path(__file__).resolve().parents[2] / "data" / "synthetic" / "force_plate"
@@ -117,10 +118,26 @@ def find_trace(athlete_code: str, session_date: date) -> Path | None:
 
 
 def available_trace_dates(athlete_code: str) -> list[str]:
+    """Dates with a readable raw file. Malformed filenames are excluded here for
+    the same reason the pipeline excludes them -- offering "2026-08-14 2" as a
+    trial date is worse than offering nothing."""
     seen: set[str] = set()
     for folder in (ALL_TRACES, SAMPLE_TRACES):
-        if folder.exists():
-            seen.update(
-                p.stem.split("_", 1)[1] for p in folder.glob(f"{athlete_code}_*.csv")
-            )
+        if not folder.exists():
+            continue
+        for p in folder.glob(f"{athlete_code}_*.csv"):
+            parsed = parse_trace_name(p.name)
+            if parsed is not None:
+                seen.add(parsed[1].isoformat())
     return sorted(seen, reverse=True)
+
+
+def ingested_session_dates(athlete_code: str) -> set[str]:
+    """Dates that actually made it into the database. A raw file on disk is not
+    proof the trial passed validation."""
+    df = _df(
+        "select s.session_date from sessions s join athletes a using (athlete_id) "
+        "where a.athlete_code = :c",
+        c=athlete_code,
+    )
+    return set() if df.empty else {d.isoformat() for d in df["session_date"]}

@@ -50,12 +50,16 @@ def test_malformed_filenames_are_skipped(name):
     assert TRACE_NAME.match(name) is None
 
 
-def test_extract_ignores_unparseable_files(tmp_path: Path):
+def test_extract_yields_csvs_and_identifies_the_parseable_ones(tmp_path: Path):
+    """Non-CSV files are not the pipeline's business, but a CSV whose name does
+    not parse is: it is yielded with no code/date so the caller can record it
+    rather than let a trial vanish without trace."""
     for n in ["ATH-001_2026-08-24.csv", "README.md", "scratch.csv"]:
         (tmp_path / n).write_text("x")
     found = list(extract_force_files(tmp_path))
-    assert len(found) == 1
-    assert found[0][1] == "ATH-001" and found[0][2] == date(2026, 8, 24)
+    assert len(found) == 2, "both CSVs should be seen; README.md should not"
+    parsed = [(c, d) for _p, c, d in found if c is not None]
+    assert parsed == [("ATH-001", date(2026, 8, 24))]
 
 
 # ---------------------------------------------------------------------------
@@ -116,3 +120,48 @@ def test_rerunning_the_pipeline_does_not_duplicate_rows():
     before = counts()
     run_pipeline(verbose=False)
     assert counts() == before, "re-running the pipeline changed row counts"
+
+
+# ---------------------------------------------------------------------------
+# one filename parser, shared by ingest and presentation
+# ---------------------------------------------------------------------------
+def test_ingest_and_dashboard_share_one_filename_parser():
+    """These were two implementations -- a strict regex in the pipeline and a
+    split('_') in the query layer. The result was a file the pipeline silently
+    skipped being offered to a coach as a trial dated '2026-08-14 2'."""
+    from src.analytics import queries
+    from src.ingest import pipeline
+    from src.ingest.naming import TRACE_NAME, parse_trace_name
+
+    assert pipeline.TRACE_NAME is TRACE_NAME
+    assert queries.parse_trace_name is parse_trace_name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ATH-007_2026-08-14 2.csv",   # an iCloud conflict copy
+        "ATH-007_2026-08-14.csv.bak",
+        "ATH-007_2026-13-01.csv",     # month 13
+        "ATH-007_20260814.csv",
+    ],
+)
+def test_malformed_filenames_do_not_parse(name):
+    from src.ingest.naming import parse_trace_name
+
+    assert parse_trace_name(name) is None
+
+
+def test_unparseable_filenames_are_reported_not_skipped(tmp_path: Path):
+    """Silently ignoring a file means a trial can disappear between the
+    collection laptop and the database with nothing to show for it."""
+    from src.ingest.pipeline import extract_force_files
+
+    (tmp_path / "ATH-001_2026-08-24.csv").write_text("x")
+    (tmp_path / "ATH-001_2026-08-24 2.csv").write_text("x")
+    (tmp_path / "junk.csv").write_text("x")
+
+    found = list(extract_force_files(tmp_path))
+    assert len(found) == 3, "malformed files must still be yielded so they can be logged"
+    unparsed = [p.name for p, code, d in found if code is None]
+    assert sorted(unparsed) == ["ATH-001_2026-08-24 2.csv", "junk.csv"]
