@@ -109,7 +109,12 @@ TEST_OF = {
 
 
 def _profile(sport: str, sex: str, squad: str, mass: float, rng) -> dict[str, float]:
-    """Starting values for one athlete, from population-appropriate bands."""
+    """Starting values for one athlete, from population-appropriate bands.
+
+    Where a published reference exists in src/db/normative.sql, the band is
+    centred on it. The comparison panel is worthless if the synthetic squad sits
+    a standard deviation above every literature mean.
+    """
     male = sex == "M"
     p: dict[str, float] = {"body_mass_kg": mass}
 
@@ -130,12 +135,12 @@ def _profile(sport: str, sex: str, squad: str, mass: float, rng) -> dict[str, fl
         p["sum7_skinfolds_mm"] = rng.uniform(40, 62) if male else rng.uniform(66, 92)
 
     elif sport == "Football":
-        p["imtp_relative_force_nkg"] = rng.uniform(30, 39) if male else rng.uniform(26, 34)
+        p["imtp_relative_force_nkg"] = rng.uniform(26, 34) if male else rng.uniform(18.5, 25.0)
         p["wingate_peak_power_w_kg"] = rng.uniform(11.5, 14.5) if male else rng.uniform(9.0, 12.0)
         p["wingate_fatigue_index_pct"] = rng.uniform(34, 54)
-        p["sprint_10m_s"] = rng.uniform(1.70, 1.82) if male else rng.uniform(1.82, 1.94)
-        p["max_velocity_ms"] = rng.uniform(8.8, 9.7) if male else rng.uniform(7.9, 8.8)
-        p["agility_505_s"] = rng.uniform(2.36, 2.52) if male else rng.uniform(2.44, 2.62)
+        p["sprint_10m_s"] = rng.uniform(1.86, 2.00) if male else rng.uniform(2.02, 2.28)
+        p["max_velocity_ms"] = rng.uniform(8.4, 9.3) if male else rng.uniform(7.5, 8.4)
+        p["agility_505_s"] = rng.uniform(2.32, 2.50) if male else rng.uniform(2.50, 2.88)
         # Yo-Yo IR1 was developed and validated on footballers; they score well.
         p["yoyo_ir1_distance_m"] = rng.uniform(1400, 2200) if male else rng.uniform(1000, 1900)
         p["sum7_skinfolds_mm"] = rng.uniform(42, 66) if male else rng.uniform(55, 88)
@@ -144,9 +149,9 @@ def _profile(sport: str, sex: str, squad: str, mass: float, rng) -> dict[str, fl
         p["imtp_relative_force_nkg"] = rng.uniform(30, 40) if male else rng.uniform(26, 35)
         p["wingate_peak_power_w_kg"] = rng.uniform(11.0, 14.5) if male else rng.uniform(9.0, 12.0)
         p["wingate_fatigue_index_pct"] = rng.uniform(36, 56)
-        p["sprint_10m_s"] = rng.uniform(1.66, 1.79) if male else rng.uniform(1.80, 1.92)
-        p["max_velocity_ms"] = rng.uniform(8.8, 9.7) if male else rng.uniform(8.0, 8.9)
-        p["agility_505_s"] = rng.uniform(2.38, 2.58) if male else rng.uniform(2.46, 2.64)
+        p["sprint_10m_s"] = rng.uniform(1.78, 1.93) if male else rng.uniform(1.92, 2.08)
+        p["max_velocity_ms"] = rng.uniform(8.6, 9.5) if male else rng.uniform(7.8, 8.7)
+        p["agility_505_s"] = rng.uniform(2.36, 2.56) if male else rng.uniform(2.46, 2.66)
         p["yoyo_ir1_distance_m"] = rng.uniform(900, 1550) if male else rng.uniform(760, 1320)
         p["sum7_skinfolds_mm"] = rng.uniform(42, 70) if male else rng.uniform(58, 92)
 
@@ -154,7 +159,7 @@ def _profile(sport: str, sex: str, squad: str, mass: float, rng) -> dict[str, fl
         p["imtp_relative_force_nkg"] = rng.uniform(36, 46) if male else rng.uniform(29, 38)
         p["wingate_peak_power_w_kg"] = rng.uniform(14.0, 17.0) if male else rng.uniform(10.5, 13.5)
         p["wingate_fatigue_index_pct"] = rng.uniform(44, 62)
-        p["sprint_10m_s"] = rng.uniform(1.60, 1.72) if male else rng.uniform(1.78, 1.90)
+        p["sprint_10m_s"] = rng.uniform(1.68, 1.80) if male else rng.uniform(1.86, 1.98)
         p["max_velocity_ms"] = rng.uniform(9.6, 10.7) if male else rng.uniform(8.5, 9.3)
         p["agility_505_s"] = rng.uniform(2.30, 2.48) if male else rng.uniform(2.42, 2.60)
         p["sum7_skinfolds_mm"] = rng.uniform(34, 56) if male else rng.uniform(48, 76)

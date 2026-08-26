@@ -53,6 +53,14 @@ STATUS = {           # status colours are reserved and always ship with a label
     "no_baseline": ("#52514e", "⚪", "No baseline"),
     "no_data":     ("#52514e", "⚪", "No data"),
 }
+STANDING = {
+    "above_reference":  ("#0ca30c", "🟢", "Above reference"),
+    "within_reference": ("#52514e", "⚪", "Within 1 SD"),
+    "below_reference":  ("#d03b3b", "🔴", "Below reference"),
+    "no_sd_published":  ("#52514e", "◌", "No SD published"),
+    "no_data":          ("#52514e", "◌", "—"),
+}
+
 ZONE = {
     "high_risk":            ("#d03b3b", "🔴", "High risk"),
     "caution":              ("#ec835a", "🟠", "Caution"),
@@ -117,6 +125,21 @@ def load_briefing():
 @st.cache_data(ttl=300, show_spinner=False)
 def load_profile(code) -> pd.DataFrame:
     return q.quality_profile(code)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_normative(code) -> pd.DataFrame:
+    return q.normative_comparison(code)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_studies() -> pd.DataFrame:
+    return q.reference_studies()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_missing_reference(code) -> pd.DataFrame:
+    return q.metrics_without_reference(code)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -383,6 +406,124 @@ with tab_profile:
                 "Blue is the measured series; the dashed orange line is the least-squares fit "
                 "whose slope produces the Trend column above. Panels marked ↓ are metrics where "
                 "a falling line is an improvement."
+            )
+
+        # ---- against published norms -------------------------------------
+        st.markdown("---")
+        st.markdown("**Against published normative data**")
+        norm = load_normative(chosen_athlete)
+        missing = load_missing_reference(chosen_athlete)
+
+        if norm.empty:
+            st.info(
+                f"No published reference in the library matches {row.sport} athletes of this sex "
+                "for the tests this athlete performs. The comparison is left empty rather than "
+                "substituted with a population that does not apply.",
+                icon="📚",
+            )
+        else:
+            n = norm.copy()
+            for c in ("athlete_value", "reference_mean", "reference_sd",
+                      "reference_low", "reference_high", "pct_vs_reference", "z_vs_reference"):
+                n[c] = pd.to_numeric(n[c], errors="coerce")
+
+            def spread(r):
+                if r.spread_type == "sd":
+                    return f"± {r.reference_sd:g} SD"
+                if r.spread_type == "ci95":
+                    return f"95% CI {r.reference_low:g}–{r.reference_high:g}"
+                if r.spread_type == "range":
+                    return f"range {r.reference_low:g}–{r.reference_high:g}"
+                return "—"
+
+            st.dataframe(
+                pd.DataFrame({
+                    "Measure": n["display_name"],
+                    "This athlete": n["athlete_value"].map("{:g}".format),
+                    "Unit": n["unit"],
+                    "Reference mean": n["reference_mean"].map("{:g}".format),
+                    "Spread": [spread(r) for r in n.itertuples(index=False)],
+                    "n": n["reference_n"],
+                    "vs reference": n["pct_vs_reference"].map(
+                        lambda v: "—" if pd.isna(v) else f"{v:+.1f}%"),
+                    "z": n["z_vs_reference"].map(
+                        lambda v: "—" if pd.isna(v) else f"{v:+.2f}"),
+                    "Standing": [chip(STANDING, x) for x in n["standing"]],
+                    "Reference population": n["population"],
+                    "Study": n["study_key"] + " (" + n["reference_year"].astype(str) + ")",
+                }),
+                hide_index=True, width="stretch",
+            )
+
+            plot = n.dropna(subset=["z_vs_reference"]).copy()
+            if not plot.empty:
+                plot["label"] = plot["display_name"] + " — " + plot["population"].str.slice(0, 34)
+                band = alt.Chart(pd.DataFrame({"lo": [-1.0], "hi": [1.0]})).mark_rect(
+                    opacity=0.13, color=STATUS["normal"][0]
+                ).encode(x="lo:Q", x2="hi:Q")
+                zero = alt.Chart(pd.DataFrame({"z": [0.0]})).mark_rule(
+                    color=MUTED, strokeDash=[4, 4], size=1
+                ).encode(x="z:Q")
+                pts = alt.Chart(plot).mark_point(
+                    filled=True, size=150, color=BLUE, stroke="white", strokeWidth=1.2
+                ).encode(
+                    x=alt.X("z_vs_reference:Q",
+                            title="Standard deviations from the published mean  (right = better)",
+                            scale=alt.Scale(domain=[-4, 4], clamp=True),
+                            axis=alt.Axis(gridColor=GRID)),
+                    y=alt.Y("label:N", title=None, sort=None,
+                            axis=alt.Axis(labelLimit=340, domainColor=GRID)),
+                    tooltip=[
+                        alt.Tooltip("display_name:N", title="Measure"),
+                        alt.Tooltip("athlete_value:Q", title="This athlete"),
+                        alt.Tooltip("reference_mean:Q", title="Reference mean"),
+                        alt.Tooltip("reference_sd:Q", title="Reference SD"),
+                        alt.Tooltip("z_vs_reference:Q", title="z", format="+.2f"),
+                        alt.Tooltip("population:N", title="Reference population"),
+                        alt.Tooltip("citation:N", title="Source"),
+                    ],
+                )
+                st.altair_chart(
+                    (band + zero + pts).properties(height=28 * len(plot) + 90)
+                    .configure_view(strokeWidth=0),
+                    width="stretch",
+                )
+                st.caption(
+                    "Plotted in standard deviations because the measures are in different units; "
+                    "the sign is corrected so right is always better. The green band is one SD "
+                    "either side of the published mean. **Only studies that published an SD "
+                    "appear here** — a 95% confidence interval describes uncertainty about the "
+                    "mean, not the spread of athletes, and dividing by it would make an athlete "
+                    "look several standard deviations from normal when they are a fraction of one."
+                )
+
+            notes = [x for x in n["protocol_note"].dropna().unique() if x]
+            if notes:
+                with st.expander("Protocol differences that affect these comparisons"):
+                    for x in notes:
+                        st.markdown(f"- {x}")
+
+        if not missing.empty:
+            st.caption(
+                "**No published reference for:** "
+                + ", ".join(missing["display_name"])
+                + ". The library covers football and basketball; swimming and sprint athletics "
+                "are not yet represented."
+            )
+
+        with st.expander("Reference library — every source, with its DOI"):
+            studies = load_studies()
+            for r in studies.itertuples(index=False):
+                ident = f"DOI [{r.doi}](https://doi.org/{r.doi})" if r.doi else (
+                    f"PMID [{r.pmid}](https://pubmed.ncbi.nlm.nih.gov/{r.pmid}/)" if r.pmid else "—")
+                st.markdown(f"**{r.citation}**")
+                st.markdown(f"{ident} · {r.n_values} value(s) in use · verified {r.verified_on}")
+                if r.note:
+                    st.caption(f"Caveat: {r.note}")
+                st.markdown("")
+            st.caption(
+                "Each entry was retrieved and read before being loaded. A value that could not "
+                "be verified against the source was left out rather than approximated."
             )
 
 # --- one test day ----------------------------------------------------------

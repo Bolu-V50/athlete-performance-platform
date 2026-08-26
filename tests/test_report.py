@@ -11,6 +11,7 @@ it is three times the athlete's variation, a female athlete referred to as
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 
@@ -180,12 +181,40 @@ def test_report_renders_every_section_without_a_model():
     from src.analytics.report import build_report, render_markdown
 
     md = render_markdown(build_report("ATH-009", TemplateBackend()))
-    for heading in ("## 1. Summary", "## 2. Physical qualities", "## 3. Current readiness",
-                    "## 4. Training load", "## 5. What the data points to",
-                    "## 6. How to read this"):
-        assert heading in md, f"missing {heading}"
+    # Matched on the section titles rather than their numbers: the numbering is
+    # presentation and shifts whenever a section is added, but the contract is
+    # that every one of these sections is present.
+    for heading in ("Summary", "Physical qualities", "Current readiness",
+                    "Training load", "What the data points to", "How to read this"):
+        assert re.search(rf"^## \d+\. {re.escape(heading)}", md, re.MULTILINE), f"missing {heading}"
     assert "| Quality | Measure |" in md
     assert "does not prescribe training" in md
+
+
+@needs_db
+def test_report_sections_are_numbered_consecutively_from_one():
+    from src.analytics.briefing import TemplateBackend
+    from src.analytics.report import build_report, render_markdown
+
+    md = render_markdown(build_report("ATH-009", TemplateBackend()))
+    numbers = [int(m) for m in re.findall(r"^## (\d+)\. ", md, re.MULTILINE)]
+    assert numbers == list(range(1, len(numbers) + 1)), f"section numbering is {numbers}"
+
+
+@needs_db
+def test_report_carries_every_published_comparison_with_its_doi():
+    from src.analytics.briefing import TemplateBackend
+    from src.analytics.report import build_report, render_markdown
+
+    rep = build_report("ATH-009", TemplateBackend())
+    md = render_markdown(rep)
+    if rep.normative.empty:
+        pytest.skip("no normative references match this athlete")
+    assert "Against published normative data" in md
+    for r in rep.normative.itertuples(index=False):
+        assert r.population in md, f"reference population missing from the report: {r.population}"
+        if r.doi:
+            assert r.doi in md, f"DOI missing from the report: {r.doi}"
 
 
 @needs_db

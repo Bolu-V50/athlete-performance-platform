@@ -39,6 +39,13 @@ SEASON_DAYS = 180
 SAMPLE_RATE = 1000
 
 ATHLETES = [
+    # Baseline values are anchored on the published means loaded in
+    # src/db/normative.sql, so the squad sits inside the reference bands rather
+    # than floating above them. Before this, the demo had professional male
+    # basketballers jumping 50 cm against a literature mean of 39.2 cm and
+    # female footballers running 10 m in 1.88 s against a reported 2.14 s --
+    # every athlete would have read as world class, which tells a coach nothing.
+    #
     # code,      sport,        sex, squad,                mass, baseline CMJ h, fatigue block
     # --- Swimming: strong vertically, unremarkable on land-running tests -----
     ("ATH-001", "Swimming",   "M", "Swimming - Sprint",   79.0, 0.41, None),
@@ -48,14 +55,14 @@ ATHLETES = [
     ("ATH-005", "Swimming",   "M", "Swimming - Distance", 74.0, 0.35, None),
     ("ATH-006", "Swimming",   "F", "Swimming - Distance", 64.0, 0.29, None),
     # --- Football: the population Yo-Yo IR1 was actually validated on --------
-    ("ATH-007", "Football",   "F", "Football - Women",    63.0, 0.31, None),
-    ("ATH-008", "Football",   "F", "Football - Women",    58.5, 0.33, None),
-    ("ATH-009", "Football",   "F", "Football - Women",    67.5, 0.29, (174, 179)),
-    ("ATH-010", "Football",   "F", "Football - Women",    61.0, 0.32, (96, 110)),
+    ("ATH-007", "Football",   "F", "Football - Women",    63.0, 0.28, None),
+    ("ATH-008", "Football",   "F", "Football - Women",    58.5, 0.32, None),
+    ("ATH-009", "Football",   "F", "Football - Women",    67.5, 0.26, (174, 179)),
+    ("ATH-010", "Football",   "F", "Football - Women",    61.0, 0.30, (96, 110)),
     # --- Basketball: tall, heavy, highest jumps in the programme -------------
-    ("ATH-011", "Basketball", "M", "Basketball - Men",    96.0, 0.48, None),
-    ("ATH-012", "Basketball", "M", "Basketball - Men",   102.0, 0.45, None),
-    ("ATH-013", "Basketball", "M", "Basketball - Men",    89.5, 0.52, None),
+    ("ATH-011", "Basketball", "M", "Basketball - Men",    96.0, 0.40, None),
+    ("ATH-012", "Basketball", "M", "Basketball - Men",   102.0, 0.37, None),
+    ("ATH-013", "Basketball", "M", "Basketball - Men",    89.5, 0.43, None),
     # --- Athletics sprints: fastest on the track, worst on the Yo-Yo ---------
     ("ATH-014", "Athletics",  "M", "Athletics - Sprints", 80.0, 0.46, (176, 179)),
     ("ATH-015", "Athletics",  "M", "Athletics - Sprints", 77.5, 0.44, None),

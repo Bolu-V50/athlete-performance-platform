@@ -138,6 +138,43 @@ INVARIANTS: list[Invariant] = [
         explain="Attributing another sport's test to an athlete means the ingest has "
                 "mismatched a row, and the resulting profile describes nobody.",
     ),
+    Invariant(
+        "I9", "every normative value is stated in its metric's catalogue unit",
+        """
+        select n.study_key, n.metric_name, n.unit as reference_unit, c.unit as catalogue_unit
+        from normative_values n
+        join metric_catalog c on c.metric_name = n.metric_name
+        where n.unit <> c.unit
+        """,
+        explain="A reference recorded in centimetres against a metric stored in metres is "
+                "off by a factor of a hundred, and the comparison would place every athlete "
+                "impossibly far from the published mean without anything looking wrong.",
+    ),
+    Invariant(
+        "I10", "every normative value cites a study that exists and is identifiable",
+        """
+        select n.norm_id, n.study_key
+        from normative_values n
+        left join reference_studies s on s.study_key = n.study_key
+        where s.study_key is null
+           or (s.doi is null and s.pmid is null)
+           or s.source_url is null
+        """,
+        explain="A published comparison a coach cannot trace back to its source is not "
+                "evidence. Every reference must carry a DOI or PMID and the URL it was "
+                "verified from.",
+    ),
+    Invariant(
+        "I11", "no z-score is computed against a spread that is not a standard deviation",
+        """
+        select metric_name, population, spread_type
+        from v_normative_comparison
+        where z_vs_reference is not null and spread_type <> 'sd'
+        """,
+        explain="A 95% confidence interval describes uncertainty about the mean, not the "
+                "spread of athletes. Dividing by it makes an athlete look several standard "
+                "deviations from normal when they are a fraction of one.",
+    ),
     # ---- diagnostics: reported, never failed ------------------------------
     Invariant(
         "D1", "stored values that fall outside their current catalogue range",

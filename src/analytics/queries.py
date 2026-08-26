@@ -213,3 +213,45 @@ def headline_history(athlete_code: str) -> pd.DataFrame:
         """,
         c=athlete_code,
     )
+
+
+# ---------------------------------------------------------------------------
+# published normative comparison
+# ---------------------------------------------------------------------------
+def normative_comparison(athlete_code: str) -> pd.DataFrame:
+    """This athlete's latest value for each metric, beside every published
+    reference matched on sport and sex."""
+    return _df(
+        "select * from v_normative_comparison where athlete_code = :c "
+        "order by quality_order, display_name, population",
+        c=athlete_code,
+    )
+
+
+def reference_studies() -> pd.DataFrame:
+    return _df(
+        "select s.*, count(n.norm_id) as n_values "
+        "from reference_studies s left join normative_values n using (study_key) "
+        "group by s.study_key, s.citation, s.doi, s.pmid, s.year, s.publication, "
+        "s.verified_on, s.source_url, s.note "
+        "order by s.year desc, s.study_key"
+    )
+
+
+def metrics_without_reference(athlete_code: str) -> pd.DataFrame:
+    """Headline metrics this athlete is tested on that have no matching published
+    reference. Shown explicitly, because an absent comparison should look like an
+    absence rather than like everything being fine."""
+    return _df(
+        """
+        select distinct p.display_name, p.quality_name, p.quality_order
+        from v_quality_profile p
+        where p.athlete_code = :c
+          and not exists (
+              select 1 from v_normative_comparison v
+              where v.athlete_code = p.athlete_code and v.metric_name = p.metric_name
+          )
+        order by p.quality_order, p.display_name
+        """,
+        c=athlete_code,
+    )

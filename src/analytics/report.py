@@ -72,6 +72,7 @@ class AthleteReport:
     reliability: pd.DataFrame
     squad_rows: pd.DataFrame
     recency: pd.DataFrame
+    normative: pd.DataFrame
     readiness: dict[str, Any]
     load: dict[str, Any]
     flags: dict[str, int]
@@ -102,6 +103,11 @@ def collect_report_data(athlete_code: str) -> AthleteReport:
     recency = _df(
         "select * from v_recent_vs_prior where athlete_code = :c and is_headline "
         "and n_recent > 0 and n_prior > 0 order by quality_order, display_name",
+        c=athlete_code,
+    )
+    normative = _df(
+        "select * from v_normative_comparison where athlete_code = :c "
+        "order by quality_order, display_name, population",
         c=athlete_code,
     )
     days = _df(
@@ -152,6 +158,7 @@ def collect_report_data(athlete_code: str) -> AthleteReport:
         reliability=reliability,
         squad_rows=squad_rows,
         recency=recency,
+        normative=normative,
         readiness={
             "baseline_status": str(r.baseline_status) if r is not None else "no_data",
             "z_score": float(r.z_score) if r is not None and r.z_score is not None else None,
@@ -187,6 +194,16 @@ def facts_summary(rep: AthleteReport) -> str:
                 f"  {r.quality_name} ({r.display_name}): {r.direction}, "
                 f"{float(r.pct_improvement_fitted):+.1f}% in the improving direction"
             )
+    if not rep.normative.empty:
+        lines += ["", "AGAINST PUBLISHED NORMS (only where a study reports a standard deviation):"]
+        for r in rep.normative.itertuples(index=False):
+            if r.z_vs_reference is None or pd.isna(r.z_vs_reference):
+                continue
+            lines.append(
+                f"  {r.display_name}: {float(r.z_vs_reference):+.2f} SD from the published mean "
+                f"for {r.population} ({r.standing.replace('_', ' ')})"
+            )
+
     rd = rep.readiness
     lines += [
         "",
@@ -500,11 +517,48 @@ def render_markdown(rep: AthleteReport) -> str:
             f"{r.direction} | {_adequacy(int(r.n_tests))} ({int(r.n_tests)}) |"
         )
 
+    out += ["", rep.slots["qualities"].text, ""]
+
+    if not rep.normative.empty:
+        out += [
+            "## 3. Against published normative data",
+            "",
+            "| Measure | This athlete | Reference mean | Spread | n | z | Standing | Reference population | Source |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for r in rep.normative.itertuples(index=False):
+            if r.spread_type == "sd":
+                spread = f"± {float(r.reference_sd):g} SD"
+            elif r.spread_type == "ci95":
+                spread = f"95% CI {float(r.reference_low):g}–{float(r.reference_high):g}"
+            elif r.spread_type == "range":
+                spread = f"range {float(r.reference_low):g}–{float(r.reference_high):g}"
+            else:
+                spread = "—"
+            z = "—" if r.z_vs_reference is None or pd.isna(r.z_vs_reference) \
+                else f"{float(r.z_vs_reference):+.2f}"
+            ident = f"[{r.study_key} {r.reference_year}](https://doi.org/{r.doi})" if r.doi \
+                else f"{r.study_key} {r.reference_year}"
+            out.append(
+                f"| {r.display_name} | {_fmt(r.athlete_value)} {r.unit} | "
+                f"{_fmt(r.reference_mean)} {r.unit} | {spread} | {r.reference_n} | {z} | "
+                f"{str(r.standing).replace('_', ' ')} | {r.population} | {ident} |"
+            )
+        notes = [x for x in rep.normative["protocol_note"].dropna().unique() if x]
+        if notes:
+            out += ["", "**Protocol differences that affect these comparisons:**", ""]
+            out += [f"- {x}" for x in notes]
+        out += [
+            "",
+            "A z-score is shown only where the source published a standard deviation. A 95% "
+            "confidence interval describes uncertainty about the mean rather than the spread of "
+            "athletes, and dividing by it would place an athlete several standard deviations from "
+            "normal when they are a fraction of one.",
+            "",
+        ]
+
     out += [
-        "",
-        rep.slots["qualities"].text,
-        "",
-        "## 3. Current readiness",
+        "## 4. Current readiness",
         "",
         f"- Neuromuscular status: **{rd['baseline_status']}**"
         + (f" (z-score {rd['z_score']:+.2f} against the athlete's own 28-day baseline)"
@@ -513,7 +567,7 @@ def render_markdown(rep: AthleteReport) -> str:
         f"{_fmt(rd['baseline_mean_m'], '.3f')} m, tested {rd['last_cmj_date']}",
         f"- Acute:chronic workload ratio: **{_fmt(rd['acwr'], '.2f')}** ({rd['acwr_zone']})",
         "",
-        "## 4. Training load, last 90 days",
+        "## 5. Training load, last 90 days",
         "",
         f"- Total session load: {_fmt(ld['total_load'], '.0f')} AU "
         f"(mean {_fmt(ld['mean_weekly_load'], '.0f')} AU per week)",
@@ -523,11 +577,11 @@ def render_markdown(rep: AthleteReport) -> str:
         f"- Neuromuscular flags in the window: {rep.flags.get('flag', 0)} flagged, "
         f"{rep.flags.get('watch', 0)} on watch, {rep.flags.get('normal', 0)} normal",
         "",
-        "## 5. What the data points to",
+        "## 6. What the data points to",
         "",
         rep.slots["discussion"].text,
         "",
-        "## 6. How to read this, and what it cannot tell you",
+        "## 7. How to read this, and what it cannot tell you",
         "",
         "- **Trends are fitted across every test, not first versus latest.** Two endpoints carry "
         "the full test-retest error of both days and can invert the direction of a real trend.",
@@ -542,6 +596,13 @@ def render_markdown(rep: AthleteReport) -> str:
         "- **The workload ratio is a discussion starter, not a rule.** The 0.80–1.30 band comes "
         "from team-sport literature and its use as a threshold is contested.",
         "- **Session RPE is self-reported** and is not comparable between athletes.",
+        "- **Every published comparison traces to a real paper**, recorded with its DOI or "
+        "PMID and the date it was verified. Where no study in the library matches the athlete's "
+        "sport and sex, the comparison is left empty rather than filled with a population that "
+        "does not apply.",
+        "- **Protocols must match before numbers do.** A countermovement jump without arm swing "
+        "is several centimetres lower than one with; a 10 m sprint time depends on the starting "
+        "position and gate height.",
         "- This report describes what was measured. It does not prescribe training.",
     ]
     if rep.quality_flags:
