@@ -8,7 +8,7 @@ from sqlalchemy import text
 from src.db.connection import get_engine, redacted_url
 
 HERE = Path(__file__).parent
-VIEW_FILES = ["views.sql", "views_qualities.sql"]
+VIEW_FILES = ["views.sql", "views_qualities.sql", "views_report.sql"]
 
 
 def main() -> None:

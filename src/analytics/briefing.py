@@ -43,6 +43,15 @@ from src.db.connection import get_engine
 
 load_dotenv()
 
+# Words that mean the model has stopped describing the data and started
+# programming the athlete. Naming where the numbers are flat is analysis;
+# deciding what to do about it depends on the competition calendar, injury
+# history and a hundred things this system cannot see.
+PRESCRIPTION_WORDS = (
+    "should ", "recommend", "prescrib", "increase the", "reduce the", "add a",
+    "sets", "reps", "sessions per week", "rest day", "deload", "must ",
+)
+
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -255,6 +264,78 @@ def numeric_guard(body: str, s: Snapshot) -> tuple[bool, list[float]]:
         if not _matches_at_written_precision(w, allowed)
     ]
     return (not offenders), offenders
+
+
+def guard_text(body: str, facts_text: str) -> tuple[bool, list[float]]:
+    """Generic traceability guard: every number in `body` must appear in `facts_text`.
+
+    The report generates prose in several separate slots rather than as one long
+    piece. That is deliberate: a single long generation gives the model far more
+    opportunity to invent a number, and one bad sentence would force the whole
+    report back to a template. Each slot carries its own facts and its own guard,
+    so a failure is contained to the paragraph that caused it.
+    """
+    allowed = set(CONTEXT_NUMBERS) | _numbers_in_text(facts_text)
+    stripped = _ISO_DATE.sub(" ", _CODE.sub(" ", body.translate(_DASHES)))
+    offenders = [
+        float(w) for w in _NUM.findall(stripped)
+        if not _matches_at_written_precision(w, allowed)
+    ]
+    return (not offenders), offenders
+
+
+_RISE = ("rose", "risen", "increased", "climbed", "grew", "gained", "went up", "up from")
+_FALL = ("fell", "fallen", "dropped", "decreased", "declined", "reduced", "went down", "down from")
+_MOVE = re.compile(
+    r"\b(" + "|".join(_RISE + _FALL) + r")\b[^.;]{0,40}?"
+    r"(-?\d+(?:\.\d+)?)\s*[^\d.;]{0,18}?\bto\s+(-?\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+
+
+def direction_contradictions(body: str) -> list[str]:
+    """Catch a claim that contradicts the two numbers in the same sentence.
+
+    The numeric guard checks that a figure is real. It cannot check what is said
+    about it, and that is where a smaller model actually slips: given a fact line
+    reading "fell from 0.360 to 0.324 m/s" it wrote "rose from 0.360 to 0.324".
+    Every number was correct and the sentence was still wrong.
+
+    This needs no knowledge of the metric. If the text says something rose and
+    then names a smaller second number, the sentence contradicts itself, and the
+    same in reverse. Metrics that improve by getting smaller are exactly where a
+    model is most likely to make this mistake.
+    """
+    bad: list[str] = []
+    for verb, a, b in _MOVE.findall(body):
+        lo, hi = float(a), float(b)
+        rising = verb.lower() in _RISE
+        if rising and hi <= lo:
+            bad.append(f"'{verb} from {a} to {b}' but {b} is not greater than {a}")
+        elif not rising and hi >= lo:
+            bad.append(f"'{verb} from {a} to {b}' but {b} is not less than {a}")
+    return bad
+
+
+_GENDERED = re.compile(r"\b(he|him|his|she|her|hers|himself|herself)\b", re.IGNORECASE)
+
+
+def gendered_pronouns(body: str) -> list[str]:
+    """Reject gendered pronouns in generated prose.
+
+    The facts blocks carry an athlete code and no sex, by design -- the athletes
+    table is de-identified and nothing downstream needs to know. Given no signal,
+    the model guessed, and called a woman in the football squad "his". A report
+    about a real person is not a place to be wrong about that, and the fix is not
+    to hand the model the sex but to have it write about "the athlete".
+    """
+    return sorted({m.lower() for m in _GENDERED.findall(body)})
+
+
+def contains_prescription(body: str) -> list[str]:
+    """Words that mean the model has stopped describing and started programming."""
+    lowered = body.lower()
+    return [w for w in PRESCRIPTION_WORDS if w in lowered]
 
 
 # ---------------------------------------------------------------------------
@@ -575,12 +656,6 @@ def athlete_numeric_guard(body: str, s: AthleteSnapshot) -> tuple[bool, list[flo
         if not _matches_at_written_precision(w, allowed)
     ]
     return (not offenders), offenders
-
-
-PRESCRIPTION_WORDS = (
-    "should ", "recommend", "prescrib", "increase the", "reduce the", "add a",
-    "sets", "reps", "sessions per week", "rest day", "deload", "must ",
-)
 
 
 def template_athlete_narrative(s: AthleteSnapshot) -> str:

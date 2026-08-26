@@ -35,6 +35,7 @@ for key in ("SUPABASE_DB_URL", "GROQ_API_KEY", "GROQ_MODEL"):
         pass
 
 from src.analytics import queries as q  # noqa: E402
+from src.analytics.report import build_report, render_markdown  # noqa: E402
 from src.analytics.briefing import (  # noqa: E402
     athlete_narrative,
     collect_snapshot,
@@ -136,6 +137,18 @@ def load_day_detail(code, day) -> pd.DataFrame:
 @st.cache_data(ttl=900, show_spinner=False)
 def load_narrative(code):
     return athlete_narrative(code)
+
+
+@st.cache_data(ttl=900, show_spinner="Assembling the report…")
+def load_report(code) -> tuple[str, dict[str, tuple[str, object, str | None]]]:
+    """Returns the rendered markdown plus per-slot provenance.
+
+    The AthleteReport object holds DataFrames, which cache awkwardly and are not
+    needed once rendered; the markdown and the provenance are.
+    """
+    rep = build_report(code)
+    prov = {k: (v.source, v.guard_passed, v.fallback_reason) for k, v in rep.slots.items()}
+    return render_markdown(rep), prov
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -278,8 +291,8 @@ else:
         "The system reports the same trends with or without a model."
     )
 
-tab_profile, tab_day, tab_nm = st.tabs(
-    ["Physical qualities", "Test day", "Neuromuscular monitoring"]
+tab_profile, tab_day, tab_nm, tab_report = st.tabs(
+    ["Physical qualities", "Test day", "Neuromuscular monitoring", "Development report"]
 )
 
 # --- physical qualities ----------------------------------------------------
@@ -637,6 +650,44 @@ with tab_nm:
             except Exception as exc:
                 st.error(f"Could not analyse this trace: {type(exc).__name__}: {exc}")
 
+
+# --- full development report ----------------------------------------------
+with tab_report:
+    st.caption(
+        "A review document rather than a dashboard panel. Every table and figure below is "
+        "assembled from SQL; three sections are written by the model, each against its own "
+        "facts and each checked separately — so one rejected paragraph costs that paragraph "
+        "and not the report."
+    )
+    if st.button("Generate report", key="gen_report", type="primary"):
+        st.session_state["report_for"] = chosen_athlete
+
+    if st.session_state.get("report_for") == chosen_athlete:
+        markdown, provenance = load_report(chosen_athlete)
+
+        cols = st.columns(len(provenance))
+        for col, (slot, (source, guard, reason)) in zip(cols, provenance.items()):
+            if guard:
+                col.success(f"**{slot}** — {source}, guard passed", icon="✅")
+            elif guard is False:
+                col.warning(f"**{slot}** — fell back to template. {reason}", icon="⚠️")
+            else:
+                col.info(f"**{slot}** — {source}. {reason or ''}", icon="ℹ️")
+
+        st.download_button(
+            "Download as Markdown",
+            data=markdown,
+            file_name=f"{chosen_athlete}_development_report.md",
+            mime="text/markdown",
+        )
+        st.divider()
+        st.markdown(markdown)
+    else:
+        st.info(
+            "Press **Generate report** to build the full review for this athlete. "
+            "It makes three model calls and takes a couple of seconds.",
+            icon="📄",
+        )
 
 # ---------------------------------------------------------------------------
 # pipeline health
