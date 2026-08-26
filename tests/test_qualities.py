@@ -25,8 +25,13 @@ def catalog():
 
 def test_every_lower_is_better_metric_is_declared(catalog):
     """If one of these ever flips to higher_is_better the dashboard will call a
-    slower sprint an improvement, and nothing else in the system would notice."""
-    lower = set(catalog[~catalog["higher_is_better"]]["metric_name"])
+    slower sprint an improvement, and nothing else in the system would notice.
+
+    Compared against False explicitly rather than with `~`: the column is
+    nullable, NULL means "this metric has no direction", and inverting an object
+    column containing None raises.
+    """
+    lower = set(catalog[catalog["higher_is_better"] == False]["metric_name"])  # noqa: E712
     assert {
         "sprint_10m_s", "sprint_30m_s", "agility_505_s", "cod_deficit_s",
         "wingate_fatigue_index_pct", "sum7_skinfolds_mm", "contraction_time_s",
@@ -65,15 +70,41 @@ def test_improvement_sign_is_flipped_for_lower_is_better_metrics():
         "from v_metric_trend where pct_change is not null and pct_change <> 0"
     )
     assert not df.empty
-    lower = df[~df["higher_is_better"]]
+    lower = df[df["higher_is_better"] == False]  # noqa: E712
     assert not lower.empty, "no lower-is-better metrics in the data to check"
     for r in lower.itertuples(index=False):
         assert float(r.pct_change) == pytest.approx(-float(r.pct_improvement), abs=0.11), (
             f"{r.metric_name}: raw {r.pct_change} vs improvement {r.pct_improvement}"
         )
-    higher = df[df["higher_is_better"]]
+    higher = df[df["higher_is_better"] == True]  # noqa: E712
     for r in higher.itertuples(index=False):
         assert float(r.pct_change) == pytest.approx(float(r.pct_improvement), abs=0.11)
+
+
+def test_a_metric_with_no_direction_gets_no_improvement_figure():
+    """A braking duration has no direction that counts as better. The catalogue
+    says so with a NULL, and the views must return NULL rather than pick a sign:
+    a fabricated polarity manufactures trends out of a phase timing."""
+    from src.analytics.queries import _df
+
+    df = _df(
+        "select metric_name, pct_improvement, pct_improvement_fitted, change_in_sd "
+        "from v_metric_trend where higher_is_better is null"
+    )
+    assert not df.empty, "no directionless metrics present to check"
+    assert df["pct_improvement"].isna().all(), (
+        "a metric with no declared direction was given an improvement figure"
+    )
+    assert df["pct_improvement_fitted"].isna().all()
+    assert df["change_in_sd"].isna().all()
+
+
+def test_directionless_metrics_never_reach_the_capability_profile():
+    """They are context, not achievements, so they must not be headline metrics."""
+    from src.analytics.queries import _df
+
+    df = _df("select metric_name from metric_catalog where higher_is_better is null and is_headline")
+    assert df.empty, f"directionless metric marked as headline: {list(df['metric_name'])}"
 
 
 def test_direction_uses_the_fitted_slope_not_the_endpoints():
