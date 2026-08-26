@@ -7,10 +7,6 @@
 --   * is the trend recent, or is it old news the coach has already acted on?
 --   * how much testing is this conclusion actually resting on?
 
-drop view if exists v_squad_comparison;
-drop view if exists v_metric_reliability;
-drop view if exists v_recent_vs_prior;
-
 -- =====================================================================
 -- v_metric_reliability — how repeatable is this athlete on this metric
 -- ---------------------------------------------------------------------

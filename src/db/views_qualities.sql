@@ -9,18 +9,9 @@
 -- CREATE OR REPLACE VIEW can only append columns, never insert one in the
 -- middle, so a column added to an existing view fails with "cannot change name
 -- of view column". Dropping in dependency order keeps this file re-runnable.
--- Dependency order matters and it spans files: the report views in
--- views_report.sql are built on v_metric_history, so they have to go first even
--- though they are defined elsewhere. Listing them here rather than reaching for
--- DROP ... CASCADE keeps the teardown explicit -- CASCADE would happily remove
--- something nobody remembered was downstream.
-drop view if exists v_squad_comparison;
-drop view if exists v_metric_reliability;
-drop view if exists v_recent_vs_prior;
-drop view if exists v_test_day;
-drop view if exists v_quality_profile;
-drop view if exists v_metric_trend;
-drop view if exists v_metric_history;
+-- Teardown is handled by src/db/apply_views.py, which drops every existing
+-- view with CASCADE before rebuilding the complete set. Hand-written DROP lines
+-- here went stale twice as new dependants were added.
 
 -- =====================================================================
 -- v_metric_history — every measurement, with what it means attached

@@ -16,9 +16,43 @@ HERE = Path(__file__).parent
 VIEW_FILES = ["views.sql", "views_qualities.sql", "views_report.sql", "views_normative.sql"]
 
 
+def drop_existing_views(conn) -> list[str]:
+    """Drop every view in the public schema, in one CASCADE statement.
+
+    The teardown used to be hand-written DROP lines at the top of the view files,
+    and it went stale twice: a new view built on v_metric_history blocked its
+    drop, and both times the file applied cleanly on a fresh database and failed
+    on the second run. A list that has to be updated whenever a view gains a
+    dependant will eventually not be.
+
+    Postgres already knows the dependency graph, so ask it for the views and let
+    CASCADE resolve the order. This is safe precisely because this function is
+    only ever called immediately before recreating the complete set: a view in
+    the database but not in these files is an orphan from a previous schema and
+    should not survive.
+    """
+    names = (
+        conn.execute(
+            text(
+                "select table_name from information_schema.views "
+                "where table_schema = 'public' order by table_name"
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if names:
+        joined = ", ".join(f'public."{n}"' for n in names)
+        conn.exec_driver_sql(f"drop view if exists {joined} cascade")
+    return list(names)
+
+
 def main() -> None:
     print(f"applying {', '.join(VIEW_FILES)} to {redacted_url()}")
     with get_engine().begin() as conn:
+        dropped = drop_existing_views(conn)
+        if dropped:
+            print(f"dropped {len(dropped)} existing view(s) before rebuilding")
         for name in VIEW_FILES:
             run_sql_file(conn, HERE / name)
         rows = (
@@ -31,7 +65,7 @@ def main() -> None:
             .scalars()
             .all()
         )
-    print("views:", ", ".join(rows))
+    print(f"views ({len(rows)}):", ", ".join(rows))
 
 
 if __name__ == "__main__":

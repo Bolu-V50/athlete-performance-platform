@@ -10,8 +10,6 @@
 -- mean, not the spread of athletes: dividing by it would make an athlete look
 -- four standard deviations from normal when they are half of one.
 
-drop view if exists v_normative_comparison;
-
 create or replace view v_normative_comparison as
 with latest as (
     select distinct on (h.athlete_id, h.metric_name, h.source)
