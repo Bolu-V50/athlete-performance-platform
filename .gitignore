@@ -1,0 +1,26 @@
+# --- credentials (NEVER commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+secrets/
+
+# --- python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- os / editor ---
+.DS_Store
+.vscode/
+.idea/
+
+# --- outputs ---
+*.log
+figures/*.png
+!figures/.gitkeep
