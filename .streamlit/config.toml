@@ -5,10 +5,11 @@ headless = true
 gatherUsageStats = false
 
 [theme]
-# Streamlit's default primary is red. On this page red already means "flagged
-# athlete", so a filter chip painted red reads as an alert. The primary is
-# moved to the chart series blue, which carries no status meaning here.
+# Streamlit's default primary is red. Red already means "flagged athlete" on this
+# page, so a filter chip painted red reads as an alert.
 primaryColor = "#2a78d6"
-backgroundColor = "#fcfcfb"
-secondaryBackgroundColor = "#f2f1ed"
+# The page sits slightly below white and cards are pushed to white on top of it.
+# Depth comes from the lightness difference rather than from a drop shadow.
+backgroundColor = "#f6f5f2"
+secondaryBackgroundColor = "#eeece7"
 textColor = "#0b0b0b"

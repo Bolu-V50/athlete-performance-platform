@@ -96,20 +96,49 @@ st.set_page_config(
 # scale so the page reads as a document with a hierarchy.
 st.html("""
 <style>
-  .block-container { padding-top: 2.4rem; max-width: 1500px; }
-  h1 { font-size: 1.85rem !important; font-weight: 650 !important;
-       letter-spacing: -0.015em; margin-bottom: 0.1rem !important; }
-  h2 { font-size: 1.18rem !important; font-weight: 620 !important;
-       margin-top: 1.9rem !important; margin-bottom: 0.5rem !important; }
-  h3 { font-size: 1.0rem !important; font-weight: 600 !important; }
-  [data-testid="stMetricValue"] { font-size: 1.7rem; font-weight: 620; }
-  [data-testid="stMetricLabel"] p { font-size: 0.78rem; color: #6b6a65; }
+  .block-container { padding-top: 3.0rem; max-width: 1520px; }
+
+  /* Streamlit's defaults are sized for notebooks: a very large h1 and headings
+     that all carry similar weight. */
+  h1 { font-size: 1.7rem !important; font-weight: 650 !important;
+       letter-spacing: -0.015em; margin-bottom: 0 !important; }
+  h2 { font-size: 1.12rem !important; font-weight: 620 !important;
+       margin-top: 1.7rem !important; margin-bottom: 0.55rem !important;
+       letter-spacing: -0.005em; }
+  /* st.subheader renders an h3, so the h2 rule never reached the section
+     headings on this page. */
+  h3 { font-size: 1.12rem !important; font-weight: 620 !important;
+       margin-top: 1.7rem !important; margin-bottom: 0.55rem !important;
+       letter-spacing: -0.005em; }
+  h6 { font-weight: 620 !important; }
+  h6 { font-size: 0.76rem !important; text-transform: uppercase;
+       letter-spacing: 0.075em; color: #8b8a83 !important;
+       margin-bottom: 0.35rem !important; }
+
+  /* Cards lift to white against the page. */
+  [data-testid="stVerticalBlockBorderWrapper"] {
+      background: #ffffff; border-radius: 10px; border-color: #e5e3dd;
+  }
+
+  [data-testid="stMetricValue"] { font-size: 1.55rem; font-weight: 620; }
+  [data-testid="stMetricLabel"] p { font-size: 0.76rem; color: #6b6a65; }
   [data-testid="stCaptionContainer"] p { font-size: 0.79rem; line-height: 1.5; }
-  [data-testid="stVerticalBlockBorderWrapper"] { border-radius: 10px; }
-  hr { margin: 1.6rem 0 !important; }
-  section[data-testid="stSidebar"] h1 { font-size: 1.05rem !important; }
+
+  [data-testid="stDataFrame"] { border-radius: 8px; }
+  .stTabs [data-baseweb="tab-list"] { gap: 1.4rem; }
+  hr { margin: 1.5rem 0 !important; border-color: #e5e3dd !important; }
+  section[data-testid="stSidebar"] h1 { font-size: 1.0rem !important; }
+
+  /* The status stripe at the top of an attention card. */
+  .status-rule { height: 3px; border-radius: 3px; margin: -2px 0 10px 0; }
 </style>
 """)
+
+
+def status_rule(colour_key: str) -> None:
+    """A coloured stripe across the top of a card, so a flagged athlete is
+    identifiable before any text is read."""
+    st.html(f'<div class="status-rule" style="background:{STATUS_HEX.get(colour_key, "#dcdad4")}"></div>')
 
 
 def theme_name() -> str:
@@ -250,6 +279,18 @@ def num(v) -> str:
     return f"{v:.3f}".rstrip("0").rstrip(".")
 
 
+def fmt(series, pattern: str = "{:.2f}", dash: str = "\u2014"):
+    """Pre-format a column to strings.
+
+    Streamlit's table frontend renders a missing cell as the literal "None",
+    ignoring the Styler's display value for it. Formatting in pandas and handing
+    over strings keeps empty cells looking empty. The cost is that the column
+    sorts as text, which is acceptable on tables this size.
+    """
+    out = pd.to_numeric(series, errors="coerce")
+    return out.map(lambda v: dash if pd.isna(v) else pattern.format(v))
+
+
 def colour_status(frame, columns: list[str], mapping: dict):
     """Colour the status words in a table. The label always carries the meaning;
     the colour is a second channel on top of it."""
@@ -302,8 +343,19 @@ st.sidebar.caption(
 # ---------------------------------------------------------------------------
 # header + briefing
 # ---------------------------------------------------------------------------
-st.title("Athlete monitoring")
-st.caption(f"Neuromuscular readiness and training load · latest testing day {hi_all}")
+head_l, head_r = st.columns([3, 2], vertical_alignment="bottom")
+with head_l:
+    st.title("Athlete monitoring")
+    st.caption("Neuromuscular readiness and training load")
+with head_r:
+    st.markdown(
+        f"<div style='text-align:right;color:#6b6a65;font-size:0.82rem;line-height:1.7'>"
+        f"<span style='color:#0b0b0b;font-weight:600'>{len(status)} athletes</span> · "
+        f"{status['squad'].nunique()} squads · {status['sport'].nunique()} sports<br>"
+        f"Latest testing day <b>{hi_all:%-d %b %Y}</b></div>",
+        unsafe_allow_html=True,
+    )
+st.html('<hr style="margin:0.9rem 0 1.3rem 0;border:0;border-top:1px solid #e5e3dd">')
 
 snapshot, briefing = load_briefing()
 
@@ -340,6 +392,7 @@ if attention.empty:
 else:
     for r in attention.itertuples(index=False):
         with st.container(border=True):
+            status_rule(r.baseline_status if r.baseline_status in STATUS_HEX else "no_data")
             left, right = st.columns([3, 5], vertical_alignment="center")
             with left:
                 st.markdown(
@@ -367,17 +420,13 @@ with st.expander("Full squad"):
         "Squad": view["squad"],
         "Sport": view["sport"],
         "Neuromuscular": [label(STATUS, x) for x in view["baseline_status"]],
-        "Jump (cm)": (view["jump_height_m"].astype(float) * 100),
-        "z": pd.to_numeric(view["z_score"], errors="coerce"),
+        "Jump (cm)": fmt(view["jump_height_m"].astype(float) * 100, "{:.1f}"),
+        "z": fmt(view["z_score"], "{:+.2f}"),
         "Workload": [label(ZONE, x) for x in view["acwr_zone"]],
-        "ACWR": pd.to_numeric(view["acwr"], errors="coerce"),
+        "ACWR": fmt(view["acwr"], "{:.2f}"),
     })
     st.dataframe(
-        colour_status(full, ["Neuromuscular"], STATUS).format(
-            {"Jump (cm)": lambda v: "\u2014" if pd.isna(v) else f"{v:.1f}",
-             "z": lambda v: "\u2014" if pd.isna(v) else f"{v:+.2f}",
-             "ACWR": lambda v: "\u2014" if pd.isna(v) else f"{v:.2f}"}
-        ),
+        colour_status(full, ["Neuromuscular"], STATUS),
         hide_index=True, width="stretch",
     )
 
@@ -424,16 +473,12 @@ with tab_profile:
             "First": prof["first_value"].astype(float),
             "Latest": prof["latest_value"].astype(float),
             "Unit": prof["unit"],
-            "Trend": pd.to_numeric(prof["pct_improvement_fitted"], errors="coerce"),
+            "Trend": fmt(prof["pct_improvement_fitted"], "{:+.1f}%"),
             "Direction": [label(DIRECTION, d) for d in prof["direction"]],
-            "Fit r\u00b2": pd.to_numeric(prof["trend_r2"], errors="coerce"),
+            "Fit r\u00b2": fmt(prof["trend_r2"], "{:.2f}"),
         })
         st.dataframe(
-            colour_status(table, ["Direction"], DIRECTION).format(
-                {"First": num, "Latest": num,
-                 "Trend": lambda v: "\u2014" if pd.isna(v) else f"{v:+.1f}%",
-                 "Fit r\u00b2": lambda v: "\u2014" if pd.isna(v) else f"{v:.2f}"},
-            ),
+            colour_status(table, ["Direction"], DIRECTION).format({"First": num, "Latest": num}),
             hide_index=True, width="stretch",
         )
         st.caption(
@@ -465,6 +510,13 @@ with tab_profile:
                        axis=alt.Axis(grid=False, format="%b", domainColor=GRID, tickCount=4))
             yq = alt.Y("metric_value:Q", title=None, scale=alt.Scale(zero=False),
                        axis=alt.Axis(gridColor=GRID, tickCount=4))
+            # The table quotes a fitted percentage; without the line it is
+            # asserted rather than shown.
+            # The fitted line carries the direction the table reports. Eight
+            # panels in one colour read as wallpaper; colouring the slope makes
+            # a declining quality findable without reading a single label.
+            direction_by_metric = dict(zip(prof["display_name"], prof["direction"]))
+            h["direction"] = h["display_name"].map(direction_by_metric).fillna("no_data")
             base_q = alt.Chart(h)
             series = base_q.mark_line(
                 color=BLUE, size=1.6,
@@ -478,12 +530,25 @@ with tab_profile:
                     alt.Tooltip("unit:N", title="Unit"),
                 ],
             )
-            # The table quotes a fitted percentage. Without the line it is
-            # asserted rather than shown, and a reader cannot tell a real trend
-            # from a number computed through scatter.
+            # `direction` has to be in the groupby: transform_regression drops
+            # every column that is not, so the colour encoding had nothing to
+            # read and the fitted lines silently vanished. It is constant within
+            # a panel, so grouping on it changes no fit.
             fitted = base_q.transform_regression(
-                "session_date", "metric_value", groupby=["panel"]
-            ).mark_line(color=ORANGE, size=1.8, strokeDash=[6, 4], opacity=0.9).encode(x=xq, y=yq)
+                "session_date", "metric_value", groupby=["panel", "direction"]
+            ).mark_line(size=2.0, strokeDash=[6, 4], opacity=0.95).encode(
+                x=xq, y=yq,
+                color=alt.Color(
+                    "direction:N",
+                    scale=alt.Scale(
+                        domain=["improving", "stable", "declining", "insufficient_data"],
+                        range=["#0ca30c", "#8b8a83", "#d03b3b", "#c9c7c0"],
+                    ),
+                    legend=alt.Legend(orient="top", title="Fitted trend", direction="horizontal",
+                                      labelExpr="datum.label == 'insufficient_data' "
+                                                "? 'Too few tests' : datum.label"),
+                ),
+            )
 
             small = (
                 alt.layer(series, fitted)
@@ -498,9 +563,9 @@ with tab_profile:
             )
             st.altair_chart(small.configure_view(strokeWidth=0), width='stretch')
             st.caption(
-                "Blue is the measured series; the dashed orange line is the least-squares fit "
-                "whose slope produces the Trend column above. Panels marked ↓ are metrics where "
-                "a falling line is an improvement."
+                "Blue is the measured series. The dashed line is the least-squares fit whose "
+                "slope produces the Trend column above, coloured by the direction it reports. "
+                "Panels marked ↓ are metrics where a falling line is an improvement."
             )
 
         # ---- against published norms -------------------------------------
@@ -538,17 +603,15 @@ with tab_profile:
                 "Reference": n["reference_mean"].astype(float),
                 "Spread": [spread(r) for r in n.itertuples(index=False)],
                 "n": n["reference_n"].astype(int),
-                "vs ref": pd.to_numeric(n["pct_vs_reference"], errors="coerce"),
-                "z": pd.to_numeric(n["z_vs_reference"], errors="coerce"),
+                "vs ref": fmt(n["pct_vs_reference"], "{:+.1f}%"),
+                "z": fmt(n["z_vs_reference"], "{:+.2f}"),
                 "Standing": [label(STANDING, x) for x in n["standing"]],
                 "Reference population": n["population"],
                 "Study": n["study_key"] + " " + n["reference_year"].astype(str),
             })
             st.dataframe(
                 colour_status(comparison, ["Standing"], STANDING).format(
-                    {"This athlete": num, "Reference": num,
-                     "vs ref": lambda v: "\u2014" if pd.isna(v) else f"{v:+.1f}%",
-                     "z": lambda v: "\u2014" if pd.isna(v) else f"{v:+.2f}"},
+                    {"This athlete": num, "Reference": num},
                 ),
                 hide_index=True, width="stretch",
             )
