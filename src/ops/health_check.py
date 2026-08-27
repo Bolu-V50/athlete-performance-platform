@@ -15,9 +15,8 @@ change. Those are reported as diagnostics instead. What is a FAIL is whether the
 catalogue and the data agree structurally -- something no threshold edit can
 retroactively break.
 
-**A check that cannot fail is not a check.** Each invariant below is written so
-that a plausible real defect would trip it, and the self-test at the bottom
-proves the query returns rows when the defect is present.
+**Each invariant has to be able to fail.** They are written so a plausible real
+defect trips them, rather than so they pass.
 """
 
 from __future__ import annotations
@@ -266,8 +265,7 @@ def run_checks(verbose: bool = True) -> int:
 
 
 def main() -> None:
-    # No output is swallowed and the exit code is the verdict: a health check
-    # whose failures are invisible to the caller is worse than none.
+    # Nothing is swallowed; the exit code carries the result.
     sys.exit(1 if run_checks() else 0)
 
 

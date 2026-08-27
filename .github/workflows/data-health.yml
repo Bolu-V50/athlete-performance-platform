@@ -36,6 +36,5 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Run invariant checks
-        # No output is redirected and the exit code is the verdict. A health
-        # check whose failures are invisible to the caller is worse than none.
+        # Nothing is redirected; the exit code carries the result.
         run: python -m src.ops.health_check

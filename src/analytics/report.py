@@ -2,10 +2,9 @@
 
 A deterministic scaffold with model-written prose in three named slots.
 
-That split is the design, not an implementation detail. Asking a language model
-to write a whole report gives it a long unconstrained output in which to invent
-a number, and one bad sentence would force the entire document back to a
-template. Here every table, every figure and every caveat is assembled in Python
+Asking the model for a whole report gives it a long unconstrained output in
+which to invent a number, and one bad sentence would force the entire document
+back to a template. Here every table, every figure and every caveat is assembled in Python
 from SQL; the model writes an executive summary, an interpretation of the
 quality trends, and a "what the data points to" section, each against its own
 facts block and each checked by its own guard. A slot that fails falls back on

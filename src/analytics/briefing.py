@@ -1,7 +1,7 @@
 """Daily coach briefing: turn today's alert table into two or three sentences.
 
-Governance is the design, not a disclaimer
-------------------------------------------
+How the numbers are kept out of the model's hands
+------------------------------------------------
 Every number in the briefing is computed by SQL in ``src/db/views.sql``. The
 language model receives those numbers already computed and is permitted to do
 exactly one thing: choose which of them matter and phrase them. It does not

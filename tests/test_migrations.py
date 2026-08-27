@@ -1,8 +1,8 @@
 """Tests that the migrations can be applied more than once.
 
-Both times a view teardown went stale, the SQL applied perfectly to a fresh
-database and failed on the second run, so nothing local caught it and CI found
-it after the push. A migration that only works once is not a migration.
+Both times a view teardown went stale, the SQL applied to a fresh database and
+failed on the second run, so nothing local caught it and CI found it after the
+push.
 """
 
 from __future__ import annotations
