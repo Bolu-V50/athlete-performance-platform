@@ -113,10 +113,17 @@ def collect_snapshot(limit_notable: int = 4) -> Snapshot:
 
         rows = list(conn.execute(text(f"select * from v_athlete_status {ATTENTION_ORDER}")))
         as_of = conn.execute(text("select max(session_date) from sessions")).scalar()
+        # The latest run of each source, not a 24-hour sum. Re-running the
+        # pipeline over the same files is normal and idempotent, so adding up
+        # every run's rejections counts the same bad row once per run: twenty
+        # re-runs turned ten genuine rejections into 3704 and made a clean
+        # database look like a data-quality emergency.
         rejected = conn.execute(
             text(
-                "select coalesce(sum(rows_rejected), 0) from pipeline_runs "
-                "where started_at >= now() - interval '24 hours'"
+                "select coalesce(sum(rows_rejected), 0) from ("
+                "  select distinct on (source) source, rows_rejected"
+                "  from pipeline_runs order by source, run_id desc"
+                ") latest"
             )
         ).scalar()
 
@@ -179,7 +186,7 @@ def render_facts(s: Snapshot) -> str:
         lines.append(" ".join(bits))
     if s.rejected_today:
         lines.append("")
-        lines.append(f"DATA QUALITY: {s.rejected_today} rows rejected by validation in the last 24 hours")
+        lines.append(f"DATA QUALITY: {s.rejected_today} rows rejected by validation on the most recent ingest")
     return "\n".join(lines)
 
 

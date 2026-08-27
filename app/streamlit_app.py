@@ -249,7 +249,8 @@ c1.metric("Athletes monitored", snapshot.n_athletes)
 c2.metric("Flagged today", snapshot.n_flag, help="CMJ at or below 1.5 SD under the athlete's own 28-day baseline")
 c3.metric("On watch", snapshot.n_watch, help="Between 1.0 and 1.5 SD below baseline")
 c4.metric("Load concerns", snapshot.n_load_concern, help="ACWR above 1.30")
-c5.metric("Rows rejected (24 h)", snapshot.rejected_today, help="Caught by pipeline validation and excluded")
+c5.metric("Rejected, latest ingest", snapshot.rejected_today,
+          help="Rows the pipeline validation excluded on the most recent run of each source. Not a running total: re-running over the same files is idempotent, so summing across runs would count the same bad row repeatedly.")
 
 # ---------------------------------------------------------------------------
 # attention queue — the five-second answer

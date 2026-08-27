@@ -7,6 +7,8 @@ compare to published data.
 
 Built as a portfolio project. The data is synthetic, the processing is not.
 
+**[Open the live dashboard](https://athlete-performance-platform-t7srsbtt93rd2j4ctrm5m4.streamlit.app)**
+
 ![Dashboard](figures/dashboard.png)
 
 ## What it does
