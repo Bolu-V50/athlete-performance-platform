@@ -46,43 +46,70 @@ from src.signal_processing.plots import plot_cmj  # noqa: E402
 
 # --- palette (validated; see the dataviz reference) ------------------------
 BLUE, ORANGE, MUTED, GRID = "#2a78d6", "#eb6834", "#52514e", "#dcdad4"
-STATUS = {           # status colours are reserved and always ship with a label
-    "flag":        ("#d03b3b", "🔴", "Flag"),
-    "watch":       ("#fab219", "🟡", "Watch"),
-    "normal":      ("#0ca30c", "🟢", "Normal"),
-    "no_baseline": ("#52514e", "⚪", "No baseline"),
-    "no_data":     ("#52514e", "⚪", "No data"),
+INK, INK_SOFT, SURFACE = "#0b0b0b", "#52514e", "#fcfcfb"
+
+# Status is carried by a coloured badge with its label inside it, so the colour
+# never has to be read on its own. Streamlit's badge colours are used rather
+# than emoji: a row of coloured circles reads as a placeholder.
+STATUS = {
+    "flag":        ("red", "Flag"),
+    "watch":       ("orange", "Watch"),
+    "normal":      ("green", "Normal"),
+    "no_baseline": ("gray", "No baseline"),
+    "no_data":     ("gray", "No data"),
+}
+ZONE = {
+    "high_risk":            ("red", "High risk"),
+    "caution":              ("orange", "Caution"),
+    "sweet_spot":           ("green", "Sweet spot"),
+    "undertrained":         ("yellow", "Undertrained"),
+    "insufficient_history": ("gray", "Building history"),
+    "no_data":              ("gray", "No data"),
+}
+DIRECTION = {
+    "improving":         ("green", "Improving"),
+    "stable":            ("gray", "Stable"),
+    "declining":         ("red", "Declining"),
+    "insufficient_data": ("gray", "Too few tests"),
+    "no_data":           ("gray", "No data"),
 }
 STANDING = {
-    "above_reference":  ("#0ca30c", "🟢", "Above reference"),
-    "within_reference": ("#52514e", "⚪", "Within 1 SD"),
-    "below_reference":  ("#d03b3b", "🔴", "Below reference"),
-    "no_sd_published":  ("#52514e", "◌", "No SD published"),
-    "no_data":          ("#52514e", "◌", "—"),
+    "above_reference":  ("green", "Above"),
+    "within_reference": ("gray", "Within 1 SD"),
+    "below_reference":  ("red", "Below"),
+    "no_sd_published":  ("gray", "No SD published"),
+    "no_data":          ("gray", "No data"),
 }
-
-ZONE = {
-    "high_risk":            ("#d03b3b", "🔴", "High risk"),
-    "caution":              ("#ec835a", "🟠", "Caution"),
-    "sweet_spot":           ("#0ca30c", "🟢", "Sweet spot"),
-    "undertrained":         ("#fab219", "🟡", "Undertrained"),
-    "insufficient_history": ("#52514e", "⚪", "Not enough history"),
-    "no_data":              ("#52514e", "⚪", "No data"),
-}
-
-DIRECTION = {
-    "improving":         ("#0ca30c", "🟢", "Improving"),
-    "stable":            ("#52514e", "⚪", "Stable"),
-    "declining":         ("#d03b3b", "🔴", "Declining"),
-    "insufficient_data": ("#52514e", "◌", "Not enough tests"),
-}
+# Chart marks still need hex, and status hues are reserved for status only.
+STATUS_HEX = {"flag": "#d03b3b", "watch": "#fab219", "normal": "#0ca30c",
+              "no_baseline": "#52514e", "no_data": "#52514e"}
 
 st.set_page_config(
     page_title="Athlete Monitoring",
-    page_icon="🏃",
+    page_icon=":material/monitoring:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Streamlit's defaults are built for notebooks: a very large h1, loose vertical
+# rhythm, and headings that all carry similar weight. This tightens the type
+# scale so the page reads as a document with a hierarchy.
+st.html("""
+<style>
+  .block-container { padding-top: 2.4rem; max-width: 1500px; }
+  h1 { font-size: 1.85rem !important; font-weight: 650 !important;
+       letter-spacing: -0.015em; margin-bottom: 0.1rem !important; }
+  h2 { font-size: 1.18rem !important; font-weight: 620 !important;
+       margin-top: 1.9rem !important; margin-bottom: 0.5rem !important; }
+  h3 { font-size: 1.0rem !important; font-weight: 600 !important; }
+  [data-testid="stMetricValue"] { font-size: 1.7rem; font-weight: 620; }
+  [data-testid="stMetricLabel"] p { font-size: 0.78rem; color: #6b6a65; }
+  [data-testid="stCaptionContainer"] p { font-size: 0.79rem; line-height: 1.5; }
+  [data-testid="stVerticalBlockBorderWrapper"] { border-radius: 10px; }
+  hr { margin: 1.6rem 0 !important; }
+  section[data-testid="stSidebar"] h1 { font-size: 1.05rem !important; }
+</style>
+""")
 
 
 def theme_name() -> str:
@@ -187,8 +214,52 @@ def analyse_trace(path_str: str):
 
 
 def chip(mapping: dict, key: str) -> str:
-    colour, icon, label = mapping.get(key, mapping.get("no_data"))
-    return f"{icon} {label}"
+    """A badge, rendered by a MarkdownColumn or st.markdown."""
+    colour, label = mapping.get(key, mapping["no_data"])
+    return f":{colour}-badge[{label}]"
+
+
+# Streamlit's `:color-badge[...]` directive is its own markdown flavour and the
+# dataframe renderer does not read it, so status inside a table is coloured text
+# through a Styler instead. Badges are used where markdown is rendered directly.
+STATUS_COLOURS = {
+    "red": "#c0392b", "orange": "#b8651b", "yellow": "#8a6d0b",
+    "green": "#0a7d0a", "gray": "#6b6a65",
+}
+
+
+def label(mapping: dict, key: str) -> str:
+    return mapping.get(key, mapping["no_data"])[1]
+
+
+def num(v) -> str:
+    """Readable across a battery that spans 0.213 m and 1398 m.
+
+    A single %g switches to scientific notation above four digits, which turned
+    a Yo-Yo distance into 1.4e+03 in the middle of a coach-facing table.
+    """
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return "\u2014"
+    v = float(v)
+    if abs(v) >= 1000:
+        return f"{v:,.0f}"
+    if abs(v) >= 100:
+        return f"{v:.0f}"
+    if abs(v) >= 10:
+        return f"{v:.1f}"
+    return f"{v:.3f}".rstrip("0").rstrip(".")
+
+
+def colour_status(frame, columns: list[str], mapping: dict):
+    """Colour the status words in a table. The label always carries the meaning;
+    the colour is a second channel on top of it."""
+    lookup = {v[1]: STATUS_COLOURS[v[0]] for v in mapping.values()}
+
+    def paint(v):
+        c = lookup.get(v)
+        return f"color: {c}; font-weight: 600" if c else ""
+
+    return frame.style.map(paint, subset=columns)
 
 
 # ---------------------------------------------------------------------------
@@ -235,22 +306,28 @@ st.title("Athlete monitoring")
 st.caption(f"Neuromuscular readiness and training load · latest testing day {hi_all}")
 
 snapshot, briefing = load_briefing()
-badge = (
-    f"generated by {briefing.source}, numeric guard passed"
-    if briefing.guard_passed
-    else f"deterministic template ({briefing.fallback_reason or 'no model configured'})"
-)
-st.info(f"**Today's briefing** — {briefing.text}", icon="📋")
-st.caption(f"Briefing source: {badge}. Every number is computed in SQL; the model only phrases them.")
 
-# --- stat tiles ------------------------------------------------------------
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Athletes monitored", snapshot.n_athletes)
-c2.metric("Flagged today", snapshot.n_flag, help="CMJ at or below 1.5 SD under the athlete's own 28-day baseline")
-c3.metric("On watch", snapshot.n_watch, help="Between 1.0 and 1.5 SD below baseline")
-c4.metric("Load concerns", snapshot.n_load_concern, help="ACWR above 1.30")
-c5.metric("Rejected, latest ingest", snapshot.rejected_today,
-          help="Rows the pipeline validation excluded on the most recent run of each source. Not a running total: re-running over the same files is idempotent, so summing across runs would count the same bad row repeatedly.")
+with st.container(border=True):
+    st.markdown("###### Today")
+    st.markdown(briefing.text)
+    badge = (
+        f"Written by {briefing.source}, numeric guard passed"
+        if briefing.guard_passed
+        else f"Deterministic template ({briefing.fallback_reason or 'no model configured'})"
+    )
+    st.caption(f"{badge}. Every number is computed in SQL; the model only phrases them.")
+
+    st.markdown("")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Athletes monitored", snapshot.n_athletes)
+    c2.metric("Flagged", snapshot.n_flag,
+              help="CMJ at or below 1.5 SD under the athlete's own 28-day baseline")
+    c3.metric("On watch", snapshot.n_watch, help="Between 1.0 and 1.5 SD below baseline")
+    c4.metric("Load concerns", snapshot.n_load_concern, help="ACWR above 1.30")
+    c5.metric("Rejected, latest ingest", snapshot.rejected_today,
+              help="Rows the pipeline validation excluded on the most recent run of each source. "
+                   "Not a running total: re-running over the same files is idempotent, so summing "
+                   "across runs would count the same bad row repeatedly.")
 
 # ---------------------------------------------------------------------------
 # attention queue — the five-second answer
@@ -259,20 +336,26 @@ st.subheader("Who needs attention")
 attention = view[view["attention_rank"] <= 4].copy()
 
 if attention.empty:
-    st.success("No athlete in the selected squads is outside their normal range today.", icon="✅")
+    st.success("No athlete in the selected squads is outside their normal range today.", icon=":material/check_circle:")
 else:
-    table = pd.DataFrame({
-        "Athlete": attention["athlete_code"],
-        "Squad": attention["squad"],
-        "Neuromuscular": [chip(STATUS, s) for s in attention["baseline_status"]],
-        "Jump (cm)": (attention["jump_height_m"].astype(float) * 100).map("{:.1f}".format),
-        "Baseline (cm)": (attention["baseline_mean_m"].astype(float) * 100).map("{:.1f}".format),
-        "z-score": attention["z_score"].astype(float).map("{:+.2f}".format),
-        "Workload": [chip(ZONE, z) for z in attention["acwr_zone"]],
-        "ACWR": attention["acwr"].astype(float).map("{:.2f}".format),
-        "Last tested": attention["last_cmj_date"],
-    })
-    st.dataframe(table, hide_index=True, width='stretch')
+    for r in attention.itertuples(index=False):
+        with st.container(border=True):
+            left, right = st.columns([3, 5], vertical_alignment="center")
+            with left:
+                st.markdown(
+                    f"**{r.athlete_code}** &nbsp; {chip(STATUS, r.baseline_status)} "
+                    f"{chip(ZONE, r.acwr_zone) if r.acwr_zone in ('caution', 'high_risk') else ''}"
+                )
+                st.caption(f"{r.squad} · last tested {r.last_cmj_date:%-d %b}")
+            with right:
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Jump", f"{float(r.jump_height_m) * 100:.1f} cm",
+                          delta=f"{(float(r.jump_height_m) - float(r.baseline_mean_m)) * 100:+.1f} cm",
+                          delta_color="normal", border=False)
+                m2.metric("28-day baseline", f"{float(r.baseline_mean_m) * 100:.1f} cm")
+                m3.metric("z-score", f"{float(r.z_score):+.2f}")
+                m4.metric("ACWR", f"{float(r.acwr):.2f}" if r.acwr is not None else "—")
+
     st.caption(
         "Ordered by urgency: a neuromuscular flag outranks a workload warning, because the jump "
         "is a measurement of the athlete whereas ACWR is an inference about accumulated exposure."
@@ -283,13 +366,20 @@ with st.expander("Full squad"):
         "Athlete": view["athlete_code"],
         "Squad": view["squad"],
         "Sport": view["sport"],
-        "Neuromuscular": [chip(STATUS, s) for s in view["baseline_status"]],
-        "Jump (cm)": (view["jump_height_m"].astype(float) * 100).map("{:.1f}".format),
-        "z-score": view["z_score"].astype(float).map("{:+.2f}".format),
-        "Workload": [chip(ZONE, z) for z in view["acwr_zone"]],
-        "ACWR": view["acwr"].astype(float).map("{:.2f}".format),
+        "Neuromuscular": [label(STATUS, x) for x in view["baseline_status"]],
+        "Jump (cm)": (view["jump_height_m"].astype(float) * 100),
+        "z": pd.to_numeric(view["z_score"], errors="coerce"),
+        "Workload": [label(ZONE, x) for x in view["acwr_zone"]],
+        "ACWR": pd.to_numeric(view["acwr"], errors="coerce"),
     })
-    st.dataframe(full, hide_index=True, width='stretch')
+    st.dataframe(
+        colour_status(full, ["Neuromuscular"], STATUS).format(
+            {"Jump (cm)": lambda v: "\u2014" if pd.isna(v) else f"{v:.1f}",
+             "z": lambda v: "\u2014" if pd.isna(v) else f"{v:+.2f}",
+             "ACWR": lambda v: "\u2014" if pd.isna(v) else f"{v:.2f}"}
+        ),
+        hide_index=True, width="stretch",
+    )
 
 # ---------------------------------------------------------------------------
 # athlete detail
@@ -302,18 +392,20 @@ _sport_suffix = "" if str(row.sport).lower() in str(row.squad).lower() else f" �
 st.subheader(f"{chosen_athlete} · {row.squad}{_sport_suffix}")
 
 narrative = load_narrative(chosen_athlete)
-st.info(narrative.text, icon="🧠")
-if narrative.guard_passed:
-    st.caption(
-        f"Development summary generated by {narrative.source}; numeric guard passed. "
-        "Trends are fitted in SQL across every test; the model selects and phrases them and is "
-        "blocked from prescribing training."
-    )
-else:
-    st.caption(
-        f"Deterministic summary ({narrative.fallback_reason or 'no model configured'}). "
-        "The system reports the same trends with or without a model."
-    )
+with st.container(border=True):
+    st.markdown("###### Development summary")
+    st.markdown(narrative.text)
+    if narrative.guard_passed:
+        st.caption(
+            f"Written by {narrative.source}, numeric guard passed. Trends are fitted in SQL "
+            "across every test; the model selects and phrases them and is blocked from "
+            "prescribing training."
+        )
+    else:
+        st.caption(
+            f"Deterministic summary ({narrative.fallback_reason or 'no model configured'}). "
+            "The system reports the same trends with or without a model."
+        )
 
 tab_profile, tab_day, tab_nm, tab_report = st.tabs(
     ["Physical qualities", "Test day", "Neuromuscular monitoring", "Development report"]
@@ -327,21 +419,23 @@ with tab_profile:
     else:
         table = pd.DataFrame({
             "Quality": prof["quality_name"],
-            "Headline metric": prof["display_name"],
-            "Tests": prof["n_tests"],
-            "First": prof["first_value"].astype(float).map("{:g}".format),
-            "Latest": prof["latest_value"].astype(float).map("{:g}".format),
+            "Measure": prof["display_name"],
+            "Tests": prof["n_tests"].astype(int),
+            "First": prof["first_value"].astype(float),
+            "Latest": prof["latest_value"].astype(float),
             "Unit": prof["unit"],
-            "Trend": [
-                "—" if pd.isna(v) else f"{float(v):+.1f}%"
-                for v in prof["pct_improvement_fitted"]
-            ],
-            "Direction": [chip(DIRECTION, d) for d in prof["direction"]],
-            "Fit (r²)": [
-                "—" if pd.isna(v) else f"{float(v):.2f}" for v in prof["trend_r2"]
-            ],
+            "Trend": pd.to_numeric(prof["pct_improvement_fitted"], errors="coerce"),
+            "Direction": [label(DIRECTION, d) for d in prof["direction"]],
+            "Fit r\u00b2": pd.to_numeric(prof["trend_r2"], errors="coerce"),
         })
-        st.dataframe(table, hide_index=True, width='stretch')
+        st.dataframe(
+            colour_status(table, ["Direction"], DIRECTION).format(
+                {"First": num, "Latest": num,
+                 "Trend": lambda v: "\u2014" if pd.isna(v) else f"{v:+.1f}%",
+                 "Fit r\u00b2": lambda v: "\u2014" if pd.isna(v) else f"{v:.2f}"},
+            ),
+            hide_index=True, width="stretch",
+        )
         st.caption(
             "**Trend is positive when the athlete got better, whichever way the metric runs** — "
             "a 505 time falling and a Yo-Yo distance rising are both progress, and the sign is "
@@ -420,7 +514,7 @@ with tab_profile:
                 f"No published reference in the library matches {row.sport} athletes of this sex "
                 "for the tests this athlete performs. The comparison is left empty rather than "
                 "substituted with a population that does not apply.",
-                icon="📚",
+                icon=":material/menu_book:",
             )
         else:
             n = norm.copy()
@@ -437,22 +531,25 @@ with tab_profile:
                     return f"range {r.reference_low:g}–{r.reference_high:g}"
                 return "—"
 
+            comparison = pd.DataFrame({
+                "Measure": n["display_name"],
+                "This athlete": n["athlete_value"].astype(float),
+                "Unit": n["unit"],
+                "Reference": n["reference_mean"].astype(float),
+                "Spread": [spread(r) for r in n.itertuples(index=False)],
+                "n": n["reference_n"].astype(int),
+                "vs ref": pd.to_numeric(n["pct_vs_reference"], errors="coerce"),
+                "z": pd.to_numeric(n["z_vs_reference"], errors="coerce"),
+                "Standing": [label(STANDING, x) for x in n["standing"]],
+                "Reference population": n["population"],
+                "Study": n["study_key"] + " " + n["reference_year"].astype(str),
+            })
             st.dataframe(
-                pd.DataFrame({
-                    "Measure": n["display_name"],
-                    "This athlete": n["athlete_value"].map("{:g}".format),
-                    "Unit": n["unit"],
-                    "Reference mean": n["reference_mean"].map("{:g}".format),
-                    "Spread": [spread(r) for r in n.itertuples(index=False)],
-                    "n": n["reference_n"],
-                    "vs reference": n["pct_vs_reference"].map(
-                        lambda v: "—" if pd.isna(v) else f"{v:+.1f}%"),
-                    "z": n["z_vs_reference"].map(
-                        lambda v: "—" if pd.isna(v) else f"{v:+.2f}"),
-                    "Standing": [chip(STANDING, x) for x in n["standing"]],
-                    "Reference population": n["population"],
-                    "Study": n["study_key"] + " (" + n["reference_year"].astype(str) + ")",
-                }),
+                colour_status(comparison, ["Standing"], STANDING).format(
+                    {"This athlete": num, "Reference": num,
+                     "vs ref": lambda v: "\u2014" if pd.isna(v) else f"{v:+.1f}%",
+                     "z": lambda v: "\u2014" if pd.isna(v) else f"{v:+.2f}"},
+                ),
                 hide_index=True, width="stretch",
             )
 
@@ -460,7 +557,7 @@ with tab_profile:
             if not plot.empty:
                 plot["label"] = plot["display_name"] + " — " + plot["population"].str.slice(0, 34)
                 band = alt.Chart(pd.DataFrame({"lo": [-1.0], "hi": [1.0]})).mark_rect(
-                    opacity=0.13, color=STATUS["normal"][0]
+                    opacity=0.13, color=STATUS_HEX["normal"]
                 ).encode(x="lo:Q", x2="hi:Q")
                 zero = alt.Chart(pd.DataFrame({"z": [0.0]})).mark_rule(
                     color=MUTED, strokeDash=[4, 4], size=1
@@ -592,7 +689,7 @@ with tab_nm:
             d["band_lo"] = d["base_cm"] - d["sd_cm"]
             d["band_hi"] = d["base_cm"] + d["sd_cm"]
             d["flag_line"] = d["base_cm"] - 1.5 * d["sd_cm"]
-            d["Status"] = d["baseline_status"].map(lambda s: STATUS.get(s, STATUS["no_data"])[2])
+            d["Status"] = d["baseline_status"].map(lambda s: STATUS.get(s, STATUS["no_data"])[1])
 
             # Weekday names are noise across a multi-week range.
             x = alt.X("session_date:T", title=None,
@@ -613,7 +710,7 @@ with tab_nm:
                 y2="band_hi:Q",
             )
             mean_line = base_chart.mark_line(color=MUTED, strokeDash=[5, 4], size=1).encode(x=x, y="base_cm:Q")
-            flag_line = base_chart.mark_line(color=STATUS["flag"][0], strokeDash=[2, 3], size=1,
+            flag_line = base_chart.mark_line(color=STATUS_HEX["flag"], strokeDash=[2, 3], size=1,
                                              opacity=0.7).encode(x=x, y="flag_line:Q")
             trend = base_chart.mark_line(color=BLUE, size=2).encode(x=x, y="jump_cm:Q")
 
@@ -623,7 +720,7 @@ with tab_nm:
             # settles it, and is redundant with colour, shape and the legend.
             halo = alt.Chart(d[d["baseline_status"] == "flag"]).mark_point(
                 shape="circle", filled=False, size=430,
-                stroke=STATUS["flag"][0], strokeWidth=2.2, opacity=0.85,
+                stroke=STATUS_HEX["flag"], strokeWidth=2.2, opacity=0.85,
             ).encode(x=x, y="jump_cm:Q")
             pts = base_chart.mark_point(filled=True, stroke="white", strokeWidth=1.2).encode(
                 x=x, y="jump_cm:Q",
@@ -631,8 +728,8 @@ with tab_nm:
                     "Status:N",
                     scale=alt.Scale(
                         domain=["Normal", "Watch", "Flag", "No baseline"],
-                        range=[STATUS["normal"][0], STATUS["watch"][0],
-                               STATUS["flag"][0], STATUS["no_baseline"][0]],
+                        range=[STATUS_HEX["normal"], STATUS_HEX["watch"],
+                               STATUS_HEX["flag"], STATUS_HEX["no_baseline"]],
                     ),
                     legend=alt.Legend(orient="top", title=None),
                 ),
@@ -680,14 +777,14 @@ with tab_nm:
             a = acwr.copy()
             a["acwr"] = pd.to_numeric(a["acwr"], errors="coerce")
             a = a.dropna(subset=["acwr"])
-            a["Zone"] = a["acwr_zone"].map(lambda z: ZONE.get(z, ZONE["no_data"])[2])
+            a["Zone"] = a["acwr_zone"].map(lambda z: ZONE.get(z, ZONE["no_data"])[1])
 
             # A scale fitted to the data alone can crop the sweet-spot band, which
             # is the very reference the line is being judged against.
             y_lo = min(0.75, float(a["acwr"].min()) - 0.05)
             y_hi = max(1.40, float(a["acwr"].max()) + 0.05)
             sweet = alt.Chart(pd.DataFrame({"lo": [0.8], "hi": [1.3]})).mark_rect(
-                opacity=0.13, color=STATUS["normal"][0]
+                opacity=0.13, color=STATUS_HEX["normal"]
             ).encode(y="lo:Q", y2="hi:Q")
             xa = alt.X("date:T", title=None,
                        axis=alt.Axis(grid=False, domainColor=GRID, format="%b %d"))
@@ -707,10 +804,10 @@ with tab_nm:
             st.altair_chart((sweet + line).properties(height=300).configure_view(strokeWidth=0)
                             .configure_axis(titlePadding=8, labelPadding=4),
                             width='stretch')
-            cur = row.acwr_zone
-            colour, icon, label = ZONE.get(cur, ZONE["no_data"])
             acwr_txt = f"{float(row.acwr):.2f}" if row.acwr is not None else "—"
-            st.markdown(f"Current zone: {icon} **{label}** · ACWR {acwr_txt}")
+            st.markdown(
+                f"Current ratio **{acwr_txt}** &nbsp; {chip(ZONE, row.acwr_zone)}"
+            )
             st.caption(
                 "Green band is the 0.80–1.30 heuristic from the team-sport literature. It is a "
                 "conversation starter, not a rule: the evidence for a hard threshold is contested."
@@ -752,7 +849,7 @@ with tab_nm:
                     st.error(
                         "**This trial was rejected by pipeline validation and is not in the "
                         "database.** " + " ".join(rejects),
-                        icon="🚫",
+                        icon=":material/block:",
                     )
                     st.caption(
                         "The waveform is shown so the fault can be diagnosed. The values below are "
@@ -769,7 +866,7 @@ with tab_nm:
                         st.warning(
                             "This trial passes validation but has not been ingested. Run the pipeline "
                             "to load it.",
-                            icon="⚠️",
+                            icon=":material/warning:",
                         )
                     m1, m2, m3, m4, m5 = st.columns(5)
                     m1.metric("Jump height", f"{result.jump_height_m * 100:.1f} cm")
@@ -783,7 +880,7 @@ with tab_nm:
 
                 warns = [f for f in result.quality_flags if not f.startswith("REJECT")]
                 if warns:
-                    st.warning(" · ".join(warns), icon="⚠️")
+                    st.warning(" · ".join(warns), icon=":material/warning:")
                 st.caption(
                     "Computed live from the raw dual-plate waveform, not read back from the database — "
                     "this is the same function the ingest pipeline runs, so the dashboard and the "
@@ -810,11 +907,11 @@ with tab_report:
         cols = st.columns(len(provenance))
         for col, (slot, (source, guard, reason)) in zip(cols, provenance.items()):
             if guard:
-                col.success(f"**{slot}** — {source}, guard passed", icon="✅")
+                col.success(f"**{slot}** — {source}, guard passed", icon=":material/check_circle:")
             elif guard is False:
-                col.warning(f"**{slot}** — fell back to template. {reason}", icon="⚠️")
+                col.warning(f"**{slot}** — fell back to template. {reason}", icon=":material/warning:")
             else:
-                col.info(f"**{slot}** — {source}. {reason or ''}", icon="ℹ️")
+                col.info(f"**{slot}** — {source}. {reason or ''}", icon=":material/info:")
 
         st.download_button(
             "Download as Markdown",
@@ -828,7 +925,7 @@ with tab_report:
         st.info(
             "Press **Generate report** to build the full review for this athlete. "
             "It makes three model calls and takes a couple of seconds.",
-            icon="📄",
+            icon=":material/article:",
         )
 
 # ---------------------------------------------------------------------------

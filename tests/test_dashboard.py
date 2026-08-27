@@ -23,6 +23,22 @@ pytestmark = needs_db
 APP = Path(__file__).resolve().parents[1] / "app" / "streamlit_app.py"
 
 
+def all_text(at) -> str:
+    """Every string the page renders, whatever widget carried it.
+
+    These assertions used to name the widget -- at.info[0] for the briefing, a
+    caption starting "Briefing source". Moving the briefing from an alert box
+    into a card broke them without anything being wrong, so they check what the
+    page says rather than which container said it.
+    """
+    parts = []
+    for group in (at.markdown, at.caption, at.info, at.success, at.warning, at.error):
+        parts += [e.value for e in group]
+    for h in (at.title, at.header, at.subheader):
+        parts += [e.value for e in h]
+    return " ".join(parts)
+
+
 @pytest.fixture(scope="module")
 def app():
     from streamlit.testing.v1 import AppTest
@@ -39,17 +55,18 @@ def test_first_screen_answers_who_needs_attention(app):
     """The design constraint is that a coach gets the answer without scrolling,
     so the headline elements must actually be on the page."""
     labels = {m.label for m in app.metric}
-    assert {"Athletes monitored", "Flagged today", "On watch", "Load concerns"} <= labels
-    assert any("Who needs attention" in s.value for s in app.subheader)
-    assert app.info and "briefing" in app.info[0].value.lower()
+    assert {"Athletes monitored", "Flagged", "On watch", "Load concerns"} <= labels
+    text = all_text(app)
+    assert "Who needs attention" in text
+    assert "Today" in text, "the squad briefing is not on the first screen"
 
 
 def test_briefing_declares_its_own_provenance(app):
     """A coach must be able to tell a model-written sentence from a template one."""
-    badges = [c.value for c in app.caption if "Briefing source" in c.value]
-    assert badges, "the briefing does not say where it came from"
-    badge = badges[0]
-    assert ("numeric guard passed" in badge) or ("deterministic template" in badge)
+    text = all_text(app)
+    assert ("numeric guard passed" in text) or ("Deterministic template" in text), (
+        "the briefing does not say whether a model wrote it and whether it was checked"
+    )
 
 
 def test_dashboard_reads_metrics_rather_than_recomputing_them(app):
@@ -59,7 +76,7 @@ def test_dashboard_reads_metrics_rather_than_recomputing_them(app):
     status = squad_status()
     on_screen = {m.label: m.value for m in app.metric}
     assert on_screen["Athletes monitored"] == str(len(status))
-    assert on_screen["Flagged today"] == str((status["baseline_status"] == "flag").sum())
+    assert on_screen["Flagged"] == str((status["baseline_status"] == "flag").sum())
 
 
 def test_attention_ordering_puts_the_worst_case_first():
