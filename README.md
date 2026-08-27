@@ -202,6 +202,10 @@ sRPE is self-reported and not comparable between athletes.
 The force-time panel analyses the raw file live. If that file changed after
 ingest the stored metrics are stale, and there's no content hash to catch it.
 
+One database. CI, local development and the public dashboard all write to the
+same Supabase instance, so a test run mutates what a visitor is looking at. A
+real service would separate at least production from staging.
+
 Normative coverage is four papers and two sports.
 
 ## Stack
