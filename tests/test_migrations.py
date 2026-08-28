@@ -17,9 +17,18 @@ pytestmark = needs_db
 
 
 def _views(conn) -> set[str]:
+    """Plain and materialised views together.
+
+    Materialised views live in pg_matviews, not information_schema.views. A
+    check that looks only at the latter passes while covering nothing, which is
+    the same silent-gap failure the teardown bug produced twice."""
     return set(
         conn.execute(
-            text("select table_name from information_schema.views where table_schema = 'public'")
+            text(
+                "select table_name from information_schema.views where table_schema = 'public' "
+                "union all "
+                "select matviewname from pg_matviews where schemaname = 'public'"
+            )
         ).scalars()
     )
 
@@ -50,6 +59,7 @@ def test_views_can_be_applied_twice_in_a_row():
 
     assert first == second, f"the view set changed on re-application: {first ^ second}"
     assert len(second) >= 12
+    assert "v_acwr" in second, "the materialised view is not being rebuilt"
 
 
 def test_schema_and_catalogue_can_be_applied_twice_in_a_row():

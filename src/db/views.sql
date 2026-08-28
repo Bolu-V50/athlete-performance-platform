@@ -39,8 +39,15 @@ left join training_load t
 --   lambda_chronic = 2/(28+1) = 0.068966
 -- A recursive CTE is genuinely required here: each day's EWMA depends on the
 -- previous day's EWMA, which no plain window function can express.
+--
+-- MATERIALISED, because a plain view re-runs the whole recursion on every query
+-- that touches it, and v_athlete_status touches it. Profiling the dashboard
+-- showed three of the slowest first-paint calls were all re-computing this same
+-- recursion: 2.5 s, 2.2 s and 1.9 s against a 180-day series. The underlying
+-- data only changes when the pipeline runs, so it is refreshed there instead.
 -- =====================================================================
-create or replace view v_acwr as
+drop materialized view if exists v_acwr cascade;
+create materialized view v_acwr as
 with recursive ewma as (
     select
         athlete_id, date, session_load, rn,
@@ -80,6 +87,9 @@ select
     end                                          as acwr_zone,
     rn                                           as days_of_history
 from ewma;
+
+create index if not exists idx_acwr_athlete_date on v_acwr(athlete_id, date desc);
+create index if not exists idx_acwr_date on v_acwr(date);
 
 -- =====================================================================
 -- v_cmj_baseline — individual 28-day rolling baseline

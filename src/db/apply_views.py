@@ -44,7 +44,20 @@ def drop_existing_views(conn) -> list[str]:
     if names:
         joined = ", ".join(f'public."{n}"' for n in names)
         conn.exec_driver_sql(f"drop view if exists {joined} cascade")
-    return list(names)
+
+    # Materialised views live in pg_matviews, not information_schema.views, and
+    # need their own DROP. Missing them leaves a stale copy that blocks the
+    # rebuild.
+    mats = (
+        conn.execute(
+            text("select matviewname from pg_matviews where schemaname = 'public' order by 1")
+        )
+        .scalars()
+        .all()
+    )
+    for m in mats:
+        conn.exec_driver_sql(f'drop materialized view if exists public."{m}" cascade')
+    return list(names) + list(mats)
 
 
 def main() -> None:
@@ -59,7 +72,9 @@ def main() -> None:
             conn.execute(
                 text(
                     "select table_name from information_schema.views "
-                    "where table_schema = 'public' order by table_name"
+                    "where table_schema = 'public' "
+                    "union all select matviewname from pg_matviews "
+                    "where schemaname = 'public' order by 1"
                 )
             )
             .scalars()

@@ -174,6 +174,18 @@ INVARIANTS: list[Invariant] = [
                 "spread of athletes. Dividing by it makes an athlete look several standard "
                 "deviations from normal when they are a fraction of one.",
     ),
+    Invariant(
+        "I12", "the materialised ACWR view is not stale",
+        """
+        select (select max(date) from training_load)  as newest_load,
+               (select max(date) from v_acwr)         as newest_in_view
+        where (select max(date) from training_load) is distinct from
+              (select max(date) from v_acwr)
+        """,
+        explain="Materialising v_acwr moved the recursion cost out of every page load, and "
+                "introduced the risk that it silently serves yesterday's numbers if a refresh "
+                "is missed. Nothing errors when that happens, so it has to be asserted.",
+    ),
     # ---- diagnostics: reported, never failed ------------------------------
     Invariant(
         "D1", "stored values that fall outside their current catalogue range",

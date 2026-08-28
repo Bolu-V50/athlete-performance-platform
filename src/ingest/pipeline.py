@@ -374,6 +374,20 @@ def ingest_srpe(conn: Connection, st: RunStats, path: Path, known: dict[str, int
 # ---------------------------------------------------------------------------
 # orchestration
 # ---------------------------------------------------------------------------
+def refresh_derived(verbose: bool = True) -> None:
+    """Rebuild anything materialised from the tables the pipeline just wrote.
+
+    v_acwr holds a day-by-day EWMA recursion. Leaving it as a plain view made
+    every dashboard query re-run the whole recursion; materialising it moves
+    that cost here, where it happens once per ingest instead of once per page
+    load.
+    """
+    with get_engine().begin() as conn:
+        conn.exec_driver_sql("refresh materialized view v_acwr")
+    if verbose:
+        print(f"[{datetime.now():%H:%M:%S}] refreshed v_acwr")
+
+
 def run_pipeline(data_dir: Path = DATA, verbose: bool = True) -> list[RunStats]:
     engine = get_engine()
     results: list[RunStats] = []
@@ -420,6 +434,8 @@ def run_pipeline(data_dir: Path = DATA, verbose: bool = True) -> list[RunStats]:
             )
             if error:
                 print(error)
+
+    refresh_derived(verbose)
     return results
 
 
